@@ -113,6 +113,23 @@ class ConversationOptions:
     # the refinement loop writes blueprint images + iteration events into the
     # current sim's folder. None when not running under a headless sim.
     sim_folder: Any | None = None
+    # Per-simulation ownership ledger (#891) and shared decision logger so the
+    # civilization claim/release/get/list tools persist to
+    # <sim>/ownership_log.jsonl and mirror deltas into the decision log.
+    ownership_ledger: Any | None = None
+    # Per-simulation trade ledger (#892) — same pattern, persists to
+    # <sim>/trade_log.jsonl and mirrors trade events into the decision log.
+    trade_ledger: Any | None = None
+    # Per-simulation theft ledger (#893) — shares the trade ledger's
+    # inventory model; persists to <sim>/theft_log.jsonl.
+    theft_ledger: Any | None = None
+    # Per-simulation diplomacy ledger (#894) — tracks factions + treaties;
+    # persists to <sim>/diplomacy_log.jsonl via the diplomacy tools.
+    diplomacy_ledger: Any | None = None
+    # Per-simulation conflict ledger (#895) — disputes + war intents;
+    # persists to <sim>/conflict_log.jsonl via the conflict tools.
+    conflict_ledger: Any | None = None
+    decision_logger: Any | None = None
 
 
 @dataclass

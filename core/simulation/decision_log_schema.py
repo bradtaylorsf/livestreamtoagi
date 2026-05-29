@@ -99,6 +99,121 @@ class NeedsStatePayload(BaseModel):
     other: dict[str, float] = Field(default_factory=dict)
 
 
+class OwnershipDeltaPayload(BaseModel):
+    """Ownership claim/release/conflict (issue #891).
+
+    ``action='conflict'`` rows record an *attempted* claim that lost to an
+    earlier owner — ``owner_agent_id`` is the would-be claimant and
+    ``claim_id`` is the existing winning claim's id.
+    """
+
+    claim_id: str
+    owner_agent_id: str
+    target_type: Literal["region", "structure", "container"]
+    target_ref: dict[str, Any] = Field(default_factory=dict)
+    action: Literal["claim", "release", "conflict"]
+    motivation: str | None = None
+
+
+class TradeEventPayload(BaseModel):
+    """Trade offer / acceptance / rejection / expiry (issue #892)."""
+
+    offer_id: str
+    proposer_id: str
+    recipient_id: str
+    give: dict[str, int] = Field(default_factory=dict)
+    want: dict[str, int] = Field(default_factory=dict)
+    motivation: str | None = None
+    action: Literal["proposed", "accepted", "rejected", "expired"]
+    reject_reason: str | None = None
+    price_observation: dict[str, Any] | None = None
+
+
+class TheftEventPayload(BaseModel):
+    """Theft attempt + outcome (issue #893).
+
+    ``detected`` reflects the detection roll at attempt time; a witness
+    that later reports the theft re-emits a row with ``detected=True`` so
+    consequence logic can fire from the report alone.
+    """
+
+    attempt_id: str
+    thief_id: str
+    victim_id: str
+    container_ref: dict[str, Any] = Field(default_factory=dict)
+    items: dict[str, int] = Field(default_factory=dict)
+    detected: bool
+    witnesses: list[str] = Field(default_factory=list)
+    motivation: str | None = None
+
+
+class DiplomacyEventPayload(BaseModel):
+    """Treaty lifecycle + faction defection (issue #894).
+
+    The same row shape covers proposal, signing, breaking, and defection.
+    ``treaty_id`` is None for defection-only events. ``parties`` lists the
+    faction ids involved (for treaty actions); defection records its
+    movement via ``from_faction`` / ``to_faction``.
+    """
+
+    treaty_id: str | None = None
+    parties: list[str] = Field(default_factory=list)
+    action: Literal["proposed", "signed", "broken", "defected"]
+    terms: dict[str, Any] = Field(default_factory=dict)
+    breaker_id: str | None = None
+    defector_id: str | None = None
+    from_faction: str | None = None
+    to_faction: str | None = None
+    motivation: str | None = None
+    reason: str | None = None
+
+
+class ConflictEventPayload(BaseModel):
+    """Dispute + war lifecycle (issue #895).
+
+    A single row shape covers the full conflict lifecycle:
+
+    * Dispute actions — ``opened``, ``evidence_submitted``, ``judged``,
+      ``resolved``, ``escalated``.
+    * War actions — ``war_declared``, ``war_seconded``, ``war_activated``,
+      ``surrendered`` (the surrender row sets ``dispute_id`` *or* ``war_id``
+      depending on what was being surrendered).
+
+    ``outcome`` captures the per-resolution side-effects (winner/loser ids,
+    judgement string, applied consequences) so downstream consumers can
+    rebuild the timeline without re-replaying every sibling ledger.
+    """
+
+    dispute_id: str | None = None
+    war_id: str | None = None
+    initiator_id: str | None = None
+    respondent_id: str | None = None
+    dispute_type: (
+        Literal["territorial", "theft", "trade_breach", "treaty_violation", "personal"] | None
+    ) = None
+    action: Literal[
+        "opened",
+        "evidence_submitted",
+        "judged",
+        "resolved",
+        "escalated",
+        "war_declared",
+        "war_seconded",
+        "war_activated",
+        "surrendered",
+    ]
+    outcome: dict[str, Any] | None = None
+    judgement: str | None = None
+    terms: dict[str, Any] | None = None
+    motivation: str | None = None
+    reason: str | None = None
+    casus_belli: str | None = None
+    target_faction_id: str | None = None
+    initiator_faction_id: str | None = None
+    seconders: list[str] = Field(default_factory=list)
+    required_quorum: int | None = None
+
+
 # ─── Row types ─────────────────────────────────────────────────────────────
 
 
@@ -160,6 +275,31 @@ class NeedsStateRow(_BaseRow):
     payload: NeedsStatePayload
 
 
+class OwnershipDeltaRow(_BaseRow):
+    event_type: Literal["ownership_delta"] = "ownership_delta"
+    payload: OwnershipDeltaPayload
+
+
+class TradeEventRow(_BaseRow):
+    event_type: Literal["trade_event"] = "trade_event"
+    payload: TradeEventPayload
+
+
+class TheftEventRow(_BaseRow):
+    event_type: Literal["theft_event"] = "theft_event"
+    payload: TheftEventPayload
+
+
+class DiplomacyEventRow(_BaseRow):
+    event_type: Literal["diplomacy_event"] = "diplomacy_event"
+    payload: DiplomacyEventPayload
+
+
+class ConflictEventRow(_BaseRow):
+    event_type: Literal["conflict_event"] = "conflict_event"
+    payload: ConflictEventPayload
+
+
 DecisionLogRow = Annotated[
     UtteranceRow
     | ToolIntentRow
@@ -169,7 +309,12 @@ DecisionLogRow = Annotated[
     | NewGoalRow
     | BlackboardMutationRow
     | WorldEventRow
-    | NeedsStateRow,
+    | NeedsStateRow
+    | OwnershipDeltaRow
+    | TradeEventRow
+    | TheftEventRow
+    | DiplomacyEventRow
+    | ConflictEventRow,
     Field(discriminator="event_type"),
 ]
 
@@ -188,8 +333,12 @@ __all__ = [
     "AllianceDeltaRow",
     "BlackboardMutationPayload",
     "BlackboardMutationRow",
+    "ConflictEventPayload",
+    "ConflictEventRow",
     "DecisionLogRow",
     "DecisionLogRowEnvelope",
+    "DiplomacyEventPayload",
+    "DiplomacyEventRow",
     "DreamPayload",
     "DreamRow",
     "MotivationLink",
@@ -197,10 +346,16 @@ __all__ = [
     "NeedsStateRow",
     "NewGoalPayload",
     "NewGoalRow",
+    "OwnershipDeltaPayload",
+    "OwnershipDeltaRow",
     "RelationshipDeltaPayload",
     "RelationshipDeltaRow",
+    "TheftEventPayload",
+    "TheftEventRow",
     "ToolIntentPayload",
     "ToolIntentRow",
+    "TradeEventPayload",
+    "TradeEventRow",
     "UtterancePayload",
     "UtteranceRow",
     "WorldEventPayload",

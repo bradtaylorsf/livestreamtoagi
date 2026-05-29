@@ -21,6 +21,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "minecraft" / "soak.sh"
 ALPHA_SCRIPT = REPO_ROOT / "scripts" / "minecraft" / "connect-alpha-bot.sh"
 COHORT_SCRIPT = REPO_ROOT / "scripts" / "minecraft" / "connect-cohort-bot.sh"
+VERA_SCRIPT = REPO_ROOT / "scripts" / "minecraft" / "connect-vera-bot.sh"
 RUN_SCRIPT = REPO_ROOT / "scripts" / "minecraft" / "run-local-sim.sh"
 RUN_SIMULATION = REPO_ROOT / "scripts" / "run_simulation.py"
 EASY_SETUP_SCRIPT = REPO_ROOT / "scripts" / "minecraft" / "setup-easy-spawn.mjs"
@@ -363,6 +364,159 @@ def test_local_sim_wrapper_loads_env_and_delegates_to_soak_dry_run(tmp_path) -> 
     assert SOAK_BOTS_LINE not in proc.stdout
     assert "init prompt:    set (" in proc.stdout
     assert "no services checked, no bots launched" in proc.stdout
+
+
+def test_env_file_model_wins_over_stale_parent_shell_export(tmp_path) -> None:
+    """A stale parent-shell LOCAL_LLM_MODEL must not pin the model: .env wins.
+
+    Regression for #903 (E21-0k). Profiles are launch-time templates resolved
+    from .env, not regenerated. Previously ``run-local-sim.sh`` exported the
+    local-model triple only when unset, so a ``LOCAL_LLM_MODEL`` left exported
+    from a prior run silently pinned the old id while the operator edited .env.
+    The model triple is now in the always-override allowlist, so .env (the
+    single source of truth for the local-dev path) wins.
+    """
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "LLM_PROVIDER=lmstudio",
+                "LOCAL_LLM_BASE_URL=http://localhost:1234/v1",
+                "LOCAL_LLM_MODEL=qwen/qwen3.5-9b",
+                "LOCAL_LLM_MODEL_BUILDING=qwen/qwen3.5-30b",
+                "LOCAL_LLM_EMBEDDING_MODEL=custom/embed-v9",
+                "EMBEDDING_PROVIDER=deterministic",
+                "CONVERSATION_MODE=embodied",
+                "MINECRAFT_BRIDGE_TOKEN=test-bridge-token",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    proc = subprocess.run(
+        ["bash", str(RUN_SCRIPT), "smoke", "--dry-run"],
+        cwd=REPO_ROOT,
+        env=_clean_env(
+            {
+                "ENV_FILE": str(env_file),
+                # Simulate a stale parent-shell export leaked from a prior run.
+                "LOCAL_LLM_MODEL": "google/gemma-4-e4b",
+                "LOCAL_LLM_MODEL_BUILDING": "google/gemma-4-26b-a4b",
+                "LOCAL_LLM_EMBEDDING_MODEL": "stale/embed",
+            }
+        ),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    # The delegated soak plan resolves the model triple from .env, not the stale
+    # parent-shell export.
+    assert "chat model:     qwen/qwen3.5-9b" in proc.stdout
+    assert "build model:    qwen/qwen3.5-30b" in proc.stdout
+    assert "chat model:     google/gemma-4-e4b" not in proc.stdout
+    # The operator wrapper echoes the same resolved triple, including embedding.
+    assert "model: qwen/qwen3.5-9b" in proc.stdout
+    assert "build model: qwen/qwen3.5-30b" in proc.stdout
+    assert "embedding model: custom/embed-v9" in proc.stdout
+    assert "stale/embed" not in proc.stdout
+
+
+def test_verify_static_fails_on_drifted_profile_placeholder(tmp_path) -> None:
+    """verify_static fails fast when a committed profile loses its placeholder.
+
+    Regression for #903 (E21-0k). Committed profiles carry literal
+    ``__LOCAL_LLM_MODEL__`` / ``__LOCAL_LLM_MODEL_BUILDING__`` placeholders that
+    the per-bot launchers substitute at launch. A hand-edited profile carrying a
+    resolved id would pin the wrong model and trip a late per-bot throw, so the
+    static gate must reject it before any bot launches. Mirrors the per-bot
+    check in connect-cohort-bot.sh.
+    """
+    work = tmp_path / "work"
+    # soak.sh resolves SCRIPT_DIR=<copy>/scripts/minecraft and REPO_ROOT=<copy>;
+    # symlink docs/ so the unrelated documentation gates in verify_static pass
+    # and only the placeholder check can fail.
+    shutil.copytree(REPO_ROOT / "scripts" / "minecraft", work / "scripts" / "minecraft")
+    (work / "docs").symlink_to(REPO_ROOT / "docs")
+    soak = work / "scripts" / "minecraft" / "soak.sh"
+
+    # Sanity: an unmodified copy still passes the static gate (placeholders intact).
+    ok_proc = subprocess.run(
+        ["bash", str(soak), "--verify"],
+        cwd=work,
+        env=_clean_env(),
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert ok_proc.returncode == 0, ok_proc.stdout + ok_proc.stderr
+    assert "Static soak verify passed" in ok_proc.stdout
+
+    # Resolve a placeholder to a literal id, as a bad commit would.
+    profile = work / "scripts" / "minecraft" / "profiles" / "vera-bot.json"
+    data = json.loads(profile.read_text(encoding="utf-8"))
+    data["model"] = "lmstudio/google/gemma-4-e4b"
+    profile.write_text(json.dumps(data, indent=4) + "\n", encoding="utf-8")
+
+    drift_proc = subprocess.run(
+        ["bash", str(soak), "--verify"],
+        cwd=work,
+        env=_clean_env(),
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert drift_proc.returncode != 0, drift_proc.stdout + drift_proc.stderr
+    combined = drift_proc.stdout + drift_proc.stderr
+    assert "placeholder drifted" in combined
+    assert "vera-bot.json" in combined
+
+
+def test_soak_records_model_triple_and_emits_refresh_log() -> None:
+    """soak.sh records the resolved triple and logs the active model once.
+
+    Regression for #903 (E21-0k): observability so an operator/test can confirm
+    which local model the staged bots actually serve after a swap.
+    """
+    source = SCRIPT.read_text(encoding="utf-8")
+    # write_metadata records the full local-model triple.
+    assert 'echo "local_llm_model=$LOCAL_LLM_MODEL"' in source
+    assert 'echo "local_llm_model_building=$LOCAL_LLM_MODEL_BUILDING"' in source
+    assert "local_llm_embedding_model=" in source
+    # Exactly one authoritative refresh line after the model finalize block.
+    assert 'info "Bot profiles refreshed for LOCAL_LLM_MODEL=${LOCAL_LLM_MODEL}"' in source
+    assert source.count("Bot profiles refreshed for LOCAL_LLM_MODEL=") == 1
+
+
+def test_cohort_profile_embedding_model_is_env_overridable() -> None:
+    """LOCAL_LLM_EMBEDDING_MODEL overrides the staged embedding; unset keeps default.
+
+    Regression for #903 (E21-0k): the staged embedding model was hardcoded, so
+    an embedding-model swap never took effect.
+    """
+    base_env = {"LOCAL_LLM_MODEL": "qwen/qwen3.5-9b"}
+    default_proc = subprocess.run(
+        ["bash", str(VERA_SCRIPT), "--dry-run"],
+        cwd=REPO_ROOT,
+        env=_clean_env(base_env),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert default_proc.returncode == 0, default_proc.stdout + default_proc.stderr
+    assert "embedding:   lmstudio/text-embedding-nomic-embed-text-v1.5" in default_proc.stdout
+
+    override_proc = subprocess.run(
+        ["bash", str(VERA_SCRIPT), "--dry-run"],
+        cwd=REPO_ROOT,
+        env=_clean_env({**base_env, "LOCAL_LLM_EMBEDDING_MODEL": "custom/embed-v9"}),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert override_proc.returncode == 0, override_proc.stdout + override_proc.stderr
+    assert "embedding:   lmstudio/custom/embed-v9" in override_proc.stdout
+    assert "text-embedding-nomic-embed-text-v1.5" not in override_proc.stdout
 
 
 def test_local_sim_plan_mode_enables_plan_building_but_keeps_execute_code_blocked(

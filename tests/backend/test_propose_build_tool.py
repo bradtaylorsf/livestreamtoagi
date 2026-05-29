@@ -45,6 +45,7 @@ def _services_for_inventory(agent_tools: list[str]) -> SimpleNamespace:
         core_memory=MagicMock(),
         recall_memory=MagicMock(),
         archival_memory=MagicMock(),
+        goal_manager=MagicMock(),
     )
 
 
@@ -123,6 +124,13 @@ def test_conversation_engine_passes_executor_to_build_agent_tools() -> None:
             services,
             simulation_mode=False,
             embodiment_executor=executor,
+            sim_folder=None,
+            ownership_ledger=None,
+            trade_ledger=None,
+            theft_ledger=None,
+            diplomacy_ledger=None,
+            conflict_ledger=None,
+            decision_logger=None,
         )
 
 
@@ -145,6 +153,13 @@ def test_director_tool_adapter_threads_executor_to_tool_builder() -> None:
         adapter._services,
         False,
         embodiment_executor=executor,
+        sim_folder=None,
+        ownership_ledger=None,
+        trade_ledger=None,
+        theft_ledger=None,
+        diplomacy_ledger=None,
+        conflict_ledger=None,
+        decision_logger=None,
     )
 
 

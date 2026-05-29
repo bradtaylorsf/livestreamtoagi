@@ -13,12 +13,24 @@ eavesdrop_tendency: 0.5
 closing_weight: 0.10
 
 tools:
+  - manage_task
   - web_search
   - dispatch_alpha
   - draft_social_post
   - draft_email
   - propose_build
   - propose_new_building
+  - claim_ownership
+  - release_ownership
+  - get_ownership
+  - list_my_claims
+  - open_dispute
+  - submit_evidence
+  - request_judgement
+  - accept_judgement
+  - declare_war
+  - second_war
+  - surrender
 
 topic_relevance:
   code: 0.1

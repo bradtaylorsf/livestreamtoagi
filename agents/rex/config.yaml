@@ -14,11 +14,27 @@ closing_weight: 0.15
 role_priority_bonus: 0.1
 
 tools:
+  - manage_task
   - execute_code
   - generate_tilemap
   - dispatch_alpha
   - propose_build
   - propose_new_building
+  - claim_ownership
+  - release_ownership
+  - get_ownership
+  - list_my_claims
+  - propose_trade
+  - accept_trade
+  - reject_trade
+  - list_pending_trades
+  - open_dispute
+  - submit_evidence
+  - request_judgement
+  - accept_judgement
+  - declare_war
+  - second_war
+  - surrender
 
 topic_relevance:
   code: 0.9

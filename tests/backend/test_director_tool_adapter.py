@@ -98,11 +98,12 @@ async def test_director_adapter_invokes_task_tool_and_writes_shared_state() -> N
 
     assert result["status"] == "ok"
     assert result["title"] == "Build a safe bridge"
-    assert result["owner"] == "rex"
+    # Default create_task posts an open, unowned proposal others can claim.
+    assert result["owner"] is None
     shared_state.add_task.assert_awaited_once()
     task = shared_state.add_task.call_args.args[0]
     assert task.title == "Build a safe bridge"
-    assert task.owner == "rex"
+    assert task.owner is None
 
 
 async def test_director_adapter_invokes_internal_send_message_tool() -> None:
@@ -262,6 +263,98 @@ def test_available_tools_only_returns_callable_now_tools() -> None:
     )
 
     assert adapter.available_tools_for("vera") == ["send_message"]
+
+
+def _bare_services() -> SimpleNamespace:
+    """Minimal services object for build_agent_tools — only event_bus/redis
+    need to be truthy; everything else stays None so get_core_tools skips the
+    optional tool blocks and the ALLOWED_AGENTS fallback gates civilization
+    tools by agent.
+    """
+    return SimpleNamespace(
+        event_bus=MagicMock(),
+        redis=MagicMock(),
+        management=None,
+        world_repo=None,
+        cost_repo=None,
+        llm_client=None,
+        memory_repo=None,
+        artifact_repo=None,
+        shared_working_state=None,
+        agent_registry=None,
+        economy_manager=None,
+        alliance_manager=None,
+        character_spawner=None,
+        voting_manager=None,
+        goal_manager=None,
+        core_memory=None,
+        recall_memory=None,
+        archival_memory=None,
+    )
+
+
+async def test_director_adapter_wires_civilization_ledgers_end_to_end(tmp_path: Path) -> None:
+    """With ledgers wired, claim_ownership/propose_trade execute (not
+    *_ledger_unavailable) and the ownership JSONL lands under the sim folder.
+    """
+    from core.civilization.ownership import OwnershipLedger
+    from core.civilization.trade import TradeLedger
+    from core.tool_executor import build_agent_tools
+
+    adapter = DirectorToolAdapter(
+        _bare_services(),
+        tool_builder=build_agent_tools,
+        sim_folder=tmp_path,
+        ownership_ledger=OwnershipLedger(tmp_path),
+        trade_ledger=TradeLedger(tmp_path),
+    )
+
+    claim = await adapter.invoke(
+        "rex",
+        "claim_ownership",
+        {
+            "target_type": "structure",
+            "target_ref": {"intent_id": "cabin-1"},
+            "motivation": "I proposed this build",
+        },
+    )
+    assert claim.get("reason") != "ownership_ledger_unavailable"
+    assert claim["status"] == "claimed"
+
+    trade = await adapter.invoke(
+        "vera",
+        "propose_trade",
+        {
+            "recipient_id": "rex",
+            "give": {"cobblestone": 8},
+            "want": {"oak_planks": 4},
+            "motivation": "swap surplus stone for planks",
+        },
+    )
+    assert trade.get("reason") != "trade_ledger_unavailable"
+    assert trade["status"] == "proposed"
+
+    assert (tmp_path / "ownership_log.jsonl").exists()
+
+
+async def test_director_adapter_without_ledger_reports_unavailable(tmp_path: Path) -> None:
+    """Regression guard: no ledger wired → civilization tool still registers
+    and returns ownership_ledger_unavailable rather than crashing.
+    """
+    from core.tool_executor import build_agent_tools
+
+    adapter = DirectorToolAdapter(_bare_services(), tool_builder=build_agent_tools)
+
+    result = await adapter.invoke(
+        "rex",
+        "claim_ownership",
+        {
+            "target_type": "structure",
+            "target_ref": {"intent_id": "cabin-1"},
+            "motivation": "I proposed this build",
+        },
+    )
+    assert result == {"status": "error", "reason": "ownership_ledger_unavailable"}
 
 
 async def test_execute_director_tool_call_returns_tool_role_message() -> None:

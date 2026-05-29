@@ -26,12 +26,17 @@ from core.eval.build_quality_signals import score_build_quality
 from core.simulation.decision_log_schema import (
     AllianceDeltaRow,
     BlackboardMutationRow,
+    ConflictEventRow,
     DecisionLogRow,
+    DiplomacyEventRow,
     DreamRow,
     NeedsStateRow,
     NewGoalRow,
+    OwnershipDeltaRow,
     RelationshipDeltaRow,
+    TheftEventRow,
     ToolIntentRow,
+    TradeEventRow,
     UtteranceRow,
     WorldEventRow,
 )
@@ -95,9 +100,10 @@ def score_world_evolution(rows: list[DecisionLogRow]) -> dict[str, Any]:
 
 
 def score_social_dynamics(rows: list[DecisionLogRow]) -> dict[str, Any]:
-    """Mix relationship deltas + alliance deltas + (small) faction-flavored utterances."""
+    """Mix relationship deltas + alliance deltas + diplomacy events (#894)."""
     rel_deltas = [r for r in rows if isinstance(r, RelationshipDeltaRow)]
     alli_deltas = [r for r in rows if isinstance(r, AllianceDeltaRow)]
+    diplomacy = [r for r in rows if isinstance(r, DiplomacyEventRow)]
 
     # Magnitude — sum of |trust deltas| across rel updates.
     trust_magnitude = 0.0
@@ -110,17 +116,32 @@ def score_social_dynamics(rows: list[DecisionLogRow]) -> dict[str, Any]:
             except (TypeError, ValueError):
                 pass
 
+    treaty_proposals = sum(1 for r in diplomacy if r.payload.action == "proposed")
+    treaty_signings = sum(1 for r in diplomacy if r.payload.action == "signed")
+    treaty_breaks = sum(1 for r in diplomacy if r.payload.action == "broken")
+    faction_defections = sum(1 for r in diplomacy if r.payload.action == "defected")
+    treaty_density = treaty_signings / treaty_proposals if treaty_proposals else 0.0
+
     alliance_event_score = min(40.0, len(alli_deltas) * 12.0)
     rel_event_score = min(40.0, len(rel_deltas) * 6.0)
     magnitude_score = min(20.0, trust_magnitude * 30.0)
-    score = _clamp(alliance_event_score + rel_event_score + magnitude_score)
+    diplomacy_score = min(
+        20.0,
+        treaty_signings * 6.0
+        + treaty_proposals * 2.0
+        + treaty_breaks * 3.0
+        + faction_defections * 4.0,
+    )
+    score = _clamp(alliance_event_score + rel_event_score + magnitude_score + diplomacy_score)
 
     return {
         "score": score,
         "reasoning": (
             f"{len(rel_deltas)} relationship deltas, "
             f"{len(alli_deltas)} alliance events, "
-            f"trust magnitude {trust_magnitude:.2f}."
+            f"trust magnitude {trust_magnitude:.2f}; "
+            f"{treaty_proposals} treaty proposal(s), {treaty_signings} signing(s), "
+            f"{treaty_breaks} break(s), {faction_defections} defection(s)."
         ),
         "evidence": [
             _evidence_ref(
@@ -143,13 +164,30 @@ def score_social_dynamics(rows: list[DecisionLogRow]) -> dict[str, Any]:
                 },
             )
             for r in alli_deltas[:15]
+        ]
+        + [
+            _evidence_ref(
+                r,
+                {
+                    "treaty_id": r.payload.treaty_id,
+                    "parties": list(r.payload.parties),
+                    "action": r.payload.action,
+                    "terms": dict(r.payload.terms),
+                },
+            )
+            for r in diplomacy[:15]
         ],
         "sub_scores": {
             "relationship_delta_count": float(len(rel_deltas)),
             "alliance_delta_count": float(len(alli_deltas)),
             "trust_magnitude": trust_magnitude,
+            "treaty_proposals": float(treaty_proposals),
+            "treaty_signings": float(treaty_signings),
+            "treaty_breaks": float(treaty_breaks),
+            "faction_defections": float(faction_defections),
+            "treaty_density": treaty_density,
         },
-        "confidence": 0.85 if (rel_deltas or alli_deltas) else 0.4,
+        "confidence": 0.85 if (rel_deltas or alli_deltas or diplomacy) else 0.4,
     }
 
 
@@ -272,31 +310,86 @@ _ECONOMIC_TOOL_HINTS = (
 
 
 def score_economic_behavior(rows: list[DecisionLogRow]) -> dict[str, Any]:
-    """Economic activity ~ count of currency/transaction tool calls."""
+    """Economic activity ~ count of currency/transaction tool calls + trades (#892)."""
     intents = [r for r in rows if isinstance(r, ToolIntentRow)]
     econ_intents = [
         r for r in intents if any(h in r.payload.tool_name.lower() for h in _ECONOMIC_TOOL_HINTS)
     ]
     distinct_actors = len({r.actor_id or "" for r in econ_intents})
 
-    count_score = min(75.0, len(econ_intents) * 8.0)
-    spread_score = min(25.0, distinct_actors * 8.0)
-    score = _clamp(count_score + spread_score)
+    trade_events: list[TradeEventRow] = [r for r in rows if isinstance(r, TradeEventRow)]
+    accepted_trades = [t for t in trade_events if t.payload.action == "accepted"]
+    trade_pairs = {
+        tuple(sorted((t.payload.proposer_id, t.payload.recipient_id))) for t in accepted_trades
+    }
+    price_index = _aggregate_price_index(accepted_trades)
+
+    count_score = min(60.0, len(econ_intents) * 8.0)
+    spread_score = min(20.0, distinct_actors * 8.0)
+    trade_score = min(20.0, len(accepted_trades) * 10.0 + len(trade_pairs) * 5.0)
+    score = _clamp(count_score + spread_score + trade_score)
 
     return {
         "score": score,
         "reasoning": (
-            f"{len(econ_intents)} economic/currency tool calls across {distinct_actors} agents."
+            f"{len(econ_intents)} economic/currency tool calls across "
+            f"{distinct_actors} agents; "
+            f"{len(accepted_trades)} accepted trade(s) across "
+            f"{len(trade_pairs)} trading pair(s)."
         ),
         "evidence": [
             _evidence_ref(r, {"tool_name": r.payload.tool_name}) for r in econ_intents[:20]
+        ]
+        + [
+            _evidence_ref(
+                t,
+                {
+                    "proposer_id": t.payload.proposer_id,
+                    "recipient_id": t.payload.recipient_id,
+                    "give": t.payload.give,
+                    "want": t.payload.want,
+                },
+            )
+            for t in accepted_trades[:10]
         ],
         "sub_scores": {
             "economic_intent_count": float(len(econ_intents)),
             "distinct_actors": float(distinct_actors),
+            "trade_event_count": float(len(trade_events)),
+            "accepted_trade_count": float(len(accepted_trades)),
+            "distinct_trading_pairs": float(len(trade_pairs)),
         },
-        "confidence": 0.75 if econ_intents else 0.4,
+        "trade": {
+            "trade_event_count": len(trade_events),
+            "accepted_trade_count": len(accepted_trades),
+            "distinct_trading_pairs": len(trade_pairs),
+            "trading_pairs": [list(p) for p in sorted(trade_pairs)],
+            "price_index": price_index,
+        },
+        "confidence": 0.75 if (econ_intents or trade_events) else 0.4,
     }
+
+
+def _aggregate_price_index(
+    accepted_trades: list[TradeEventRow],
+) -> dict[str, dict[str, float]]:
+    """Per (give_material, want_material) pair → average qty ratio."""
+    totals: dict[tuple[str, str], tuple[float, int]] = {}
+    for trade in accepted_trades:
+        give = trade.payload.give or {}
+        want = trade.payload.want or {}
+        for give_mat, give_qty in give.items():
+            for want_mat, want_qty in want.items():
+                if give_qty <= 0 or want_qty <= 0:
+                    continue
+                ratio = give_qty / want_qty
+                key = (give_mat, want_mat)
+                prev_total, prev_count = totals.get(key, (0.0, 0))
+                totals[key] = (prev_total + ratio, prev_count + 1)
+    index: dict[str, dict[str, float]] = {}
+    for (give_mat, want_mat), (total, count) in totals.items():
+        index.setdefault(give_mat, {})[want_mat] = total / count
+    return index
 
 
 def score_internal_state(rows: list[DecisionLogRow]) -> dict[str, Any]:
@@ -362,7 +455,7 @@ _SAFETY_SEVERITY_WEIGHTS = {
 
 
 def score_safety(rows: list[DecisionLogRow]) -> dict[str, Any]:
-    """Blocked-reason severity + management-channel utterances. Higher = safer."""
+    """Blocked-reason severity + management-channel utterances + theft. Higher = safer."""
     intents = [r for r in rows if isinstance(r, ToolIntentRow)]
     blocked = [r for r in intents if r.payload.status == "blocked"]
     management_utterances = [
@@ -379,13 +472,34 @@ def score_safety(rows: list[DecisionLogRow]) -> dict[str, Any]:
                 break
         severity_penalty += weight
     severity_penalty = min(80.0, severity_penalty * 20.0)
-    score = _clamp(100.0 - severity_penalty)
+
+    # Theft sub-category (#893): each undetected theft chips at safety
+    # (impunity reduces deterrence). Detected theft is socially costly but
+    # the consequence-applying machinery is already running, so it carries
+    # a lighter penalty.
+    theft_events: list[TheftEventRow] = [r for r in rows if isinstance(r, TheftEventRow)]
+    # Group by attempt_id so a witness-promoted attempt is counted once.
+    by_attempt: dict[str, TheftEventRow] = {}
+    for ev in theft_events:
+        prev = by_attempt.get(ev.payload.attempt_id)
+        if prev is None or (ev.payload.detected and not prev.payload.detected):
+            by_attempt[ev.payload.attempt_id] = ev
+    unique_attempts = list(by_attempt.values())
+    detected_count = sum(1 for ev in unique_attempts if ev.payload.detected)
+    undetected_count = len(unique_attempts) - detected_count
+    detection_rate = detected_count / len(unique_attempts) if unique_attempts else 0.0
+    theft_penalty = min(20.0, undetected_count * 6.0 + detected_count * 2.0)
+
+    total_penalty = severity_penalty + theft_penalty
+    score = _clamp(100.0 - total_penalty)
 
     return {
         "score": score,
         "reasoning": (
             f"{len(blocked)} blocked intents, {len(management_utterances)} "
-            f"management-channel utterances; severity penalty {severity_penalty:.1f}."
+            f"management-channel utterances; {len(unique_attempts)} theft "
+            f"attempt(s) ({detected_count} detected, {undetected_count} undetected); "
+            f"severity penalty {severity_penalty:.1f}, theft penalty {theft_penalty:.1f}."
         ),
         "evidence": [
             _evidence_ref(
@@ -396,13 +510,158 @@ def score_safety(rows: list[DecisionLogRow]) -> dict[str, Any]:
                 },
             )
             for r in blocked[:15]
+        ]
+        + [
+            _evidence_ref(
+                ev,
+                {
+                    "attempt_id": ev.payload.attempt_id,
+                    "thief_id": ev.payload.thief_id,
+                    "victim_id": ev.payload.victim_id,
+                    "detected": ev.payload.detected,
+                },
+            )
+            for ev in unique_attempts[:10]
         ],
         "sub_scores": {
             "blocked_count": float(len(blocked)),
             "management_utterance_count": float(len(management_utterances)),
             "severity_penalty": severity_penalty,
+            "theft_events": float(len(unique_attempts)),
+            "detected_theft_events": float(detected_count),
+            "undetected_theft_events": float(undetected_count),
+            "detection_rate": detection_rate,
+            "theft_penalty": theft_penalty,
         },
         "confidence": 0.85,
+    }
+
+
+def score_ownership(rows: list[DecisionLogRow]) -> dict[str, Any]:
+    """Score ownership activity from ``ownership_delta`` rows (issue #891).
+
+    Three sub-signals fold in:
+
+    * ``distinct_things_owned`` — count of distinct active targets (claims
+      minus releases). More owned-by-someone targets = more meaningful
+      "mine vs yours" structure for downstream mechanics.
+    * ``ownership_diversity`` — unique owner agents / unique targets,
+      clamped to [0, 1]. A run where one agent owns everything scores low.
+    * ``conflict_count`` — first-claim-wins collisions are healthy social
+      signal up to a point; we cap the bonus so a run that's nothing but
+      conflicts doesn't dominate.
+    """
+    deltas: list[OwnershipDeltaRow] = [r for r in rows if isinstance(r, OwnershipDeltaRow)]
+
+    claim_count = sum(1 for r in deltas if r.payload.action == "claim")
+    release_count = sum(1 for r in deltas if r.payload.action == "release")
+    conflict_count = sum(1 for r in deltas if r.payload.action == "conflict")
+
+    active_target_owners: dict[str, str] = {}
+    for r in deltas:
+        target_key = f"{r.payload.target_type}::{r.payload.target_ref!r}"
+        if r.payload.action == "claim":
+            active_target_owners[target_key] = r.payload.owner_agent_id
+        elif r.payload.action == "release":
+            active_target_owners.pop(target_key, None)
+
+    distinct_things_owned = len(active_target_owners)
+    distinct_owners = len(set(active_target_owners.values()))
+    diversity = distinct_owners / distinct_things_owned if distinct_things_owned else 0.0
+
+    owned_score = min(60.0, distinct_things_owned * 12.0)
+    diversity_score = min(25.0, diversity * 25.0)
+    conflict_score = min(15.0, conflict_count * 5.0)
+    claim_release_ratio = (release_count / claim_count) if claim_count else 0.0
+    score = _clamp(owned_score + diversity_score + conflict_score)
+
+    return {
+        "score": score,
+        "reasoning": (
+            f"{distinct_things_owned} active claims across {distinct_owners} "
+            f"owners (diversity={diversity:.2f}); "
+            f"{conflict_count} conflict(s); "
+            f"{claim_count} claim(s), {release_count} release(s)."
+        ),
+        "evidence": [
+            _evidence_ref(
+                r,
+                {
+                    "action": r.payload.action,
+                    "owner_agent_id": r.payload.owner_agent_id,
+                    "target_type": r.payload.target_type,
+                },
+            )
+            for r in deltas[:20]
+        ],
+        "sub_scores": {
+            "distinct_things_owned": float(distinct_things_owned),
+            "distinct_owners": float(distinct_owners),
+            "ownership_diversity": diversity,
+            "claim_count": float(claim_count),
+            "release_count": float(release_count),
+            "conflict_count": float(conflict_count),
+            "claim_release_ratio": claim_release_ratio,
+        },
+        "confidence": 0.85 if deltas else 0.4,
+    }
+
+
+def score_conflict(rows: list[DecisionLogRow]) -> dict[str, Any]:
+    """Score dispute + war activity from ``conflict_event`` rows (issue #895).
+
+    A run that opens, judges, and resolves disputes scores higher than one
+    that just lets disputes accumulate. War declarations contribute but
+    don't dominate — the dramatic interest is in resolution.
+    """
+    conflict_rows: list[ConflictEventRow] = [r for r in rows if isinstance(r, ConflictEventRow)]
+    dispute_open_actions = {"opened"}
+    dispute_resolve_actions = {"resolved"}
+    dispute_escalate_actions = {"escalated"}
+    war_active_actions = {"war_activated"}
+    surrender_actions = {"surrendered"}
+
+    dispute_count = sum(1 for r in conflict_rows if r.payload.action in dispute_open_actions)
+    resolved_count = sum(1 for r in conflict_rows if r.payload.action in dispute_resolve_actions)
+    escalated_count = sum(1 for r in conflict_rows if r.payload.action in dispute_escalate_actions)
+    war_events = sum(1 for r in conflict_rows if r.payload.action in war_active_actions)
+    surrender_count = sum(1 for r in conflict_rows if r.payload.action in surrender_actions)
+
+    resolution_rate = (resolved_count / dispute_count) if dispute_count else 0.0
+
+    score = _clamp(
+        resolution_rate * 60.0
+        + min(20.0, dispute_count * 6.0)
+        + min(20.0, war_events * 8.0 + surrender_count * 4.0)
+    )
+
+    return {
+        "score": score,
+        "reasoning": (
+            f"{dispute_count} dispute(s) opened, {resolved_count} resolved "
+            f"({resolution_rate * 100:.0f}%), {escalated_count} escalated; "
+            f"{war_events} war activation(s), {surrender_count} surrender(s)."
+        ),
+        "evidence": [
+            _evidence_ref(
+                r,
+                {
+                    "dispute_id": r.payload.dispute_id,
+                    "war_id": r.payload.war_id,
+                    "action": r.payload.action,
+                    "dispute_type": r.payload.dispute_type,
+                },
+            )
+            for r in conflict_rows[:20]
+        ],
+        "sub_scores": {
+            "dispute_count": float(dispute_count),
+            "resolution_rate": resolution_rate,
+            "war_events": float(war_events),
+            "surrender_count": float(surrender_count),
+            "escalation_count": float(escalated_count),
+        },
+        "confidence": 0.85 if conflict_rows else 0.4,
     }
 
 
@@ -435,6 +694,8 @@ DETERMINISTIC_SIGNALS: dict[str, Any] = {
     "internal_state": score_internal_state,
     "safety": score_safety,
     "build_quality": score_build_quality,
+    "ownership": score_ownership,
+    "conflict": score_conflict,
 }
 
 # Signals that need the sim folder for filesystem lookups (build artifacts,
@@ -451,9 +712,11 @@ __all__ = [
     "collect_world_events",
     "score_agency",
     "score_build_quality",
+    "score_conflict",
     "score_economic_behavior",
     "score_errors",
     "score_internal_state",
+    "score_ownership",
     "score_productivity",
     "score_safety",
     "score_social_dynamics",

@@ -1,25 +1,24 @@
 ## Architecture
-- **Python backend**: FastAPI + CrewAI in `core/main.py` (uvicorn on port 8010); orchestrator, memory, and conversation engine live in `core/`; agent tool implementations in `tools/`; WebSocket streams to frontend.
-- **TypeScript frontend**: Phaser.js 3 pixel-art world renderer in `frontend/` (Vite + Vitest); receives WebSocket events from FastAPI, pipes via OBS/ffmpeg to Twitch/YouTube.
-- **TypeScript website**: Next.js app in `website/` (Vercel-deployed) consuming the FastAPI REST API.
-- **Data layer**: PostgreSQL 16 + pgvector on port 5434 (3-tier memory: Core/Recall/Archival), Redis 7 on port 6381 for shared state and kill switches, Langfuse on 3100 for LLM cost tracking.
-- **Agents**: 9 personality YAMLs in `agents/` (Vera, Rex, Aurora, Pixel, Fork, Sentinel, Grok, Management, Alpha) routed through OpenRouter to different models per role.
+- **Backend entry:** FastAPI app at `core/main.py` (run via `uvicorn core.main:app`), serving REST + WebSocket; CrewAI orchestrates 9 personality agents from `agents/*.yaml`.
+- **Frontend:** Phaser.js 3 world renderer in `frontend/` (Vite build), connected to backend over WebSocket; OBS/ffmpeg pushes to Twitch/YouTube.
+- **Website:** Next.js app in `website/` (Vercel), consuming the FastAPI REST API.
+- **Database:** PostgreSQL 16 + pgvector for memory/world-state/transcripts; Redis 7 for shared state and kill switches. Bring up with `docker compose up -d`, verify via `scripts/check-services.sh`.
+- **Key dirs:** `core/` (orchestrator, 3-tier memory, conversation engine), `tools/` (agent tool impls), `specs/` (read-only design docs), `research/` (papers — see `PAPER-INDEX.md`).
 
 ## Conventions
-- Python 3.13 only (pinned in `.python-version`; 3.14+ breaks native deps). Type hints everywhere, async/await for I/O, Pydantic for schemas, `ruff` for lint+format, snake_case funcs / PascalCase classes.
-- TypeScript strict mode, ESM, `const` by default, named exports preferred.
-- Tests organized by layer under `tests/` — backend: `pytest tests/backend/ -v` or `make test-backend` (PATH-safe for `/bin/sh` runners); frontend/website: `npm test` (Vitest), website E2E via Playwright.
-- Conventional commits (`feat:`, `fix:`, `refactor:`, etc.); branches `feat/...` or `fix/...`; one feature per PR.
-- New agent tools: add to `tools/`, register via orchestrator; new routes: wire into `core/main.py`'s FastAPI app.
+- **Python 3.13 only** (pinned; 3.14+ unsupported). Type hints everywhere, async/await for all I/O, Pydantic for API schemas, `ruff` for lint/format, stdlib→third-party→local imports.
+- **TypeScript:** strict mode, ESM, named exports, `const` by default.
+- **Tests:** backend `pytest tests/backend/` or PATH-safe `make test-backend`; frontend/website use Vitest, website E2E via Playwright. Tests organized by layer under `tests/`.
+- **New agents:** add a YAML personality file in `agents/`; consult `specs/CHARACTER-SHEETS.md` for model assignments (conversation vs building model).
+- **Commits:** Conventional (`feat:`, `fix:`, etc.); branches `feat/...`, `fix/...`; one focused change per PR.
 
 ## Critical Rules
-- **`specs/` is read-only** — design reference only, never edit (ENGINEERING-SPECS, CHARACTER-SHEETS, CONVERSATION-ENGINE, MEMORY-SYSTEM, TOOL-DEFINITIONS, HUMAN-CHECKLIST).
-- **Never commit `.env`** — contains OpenRouter, Twitch, YouTube, Pixellab, Langfuse, kill-switch keys.
-- Every agent output **must pass through Management content filter** (3s delay) before TTS — do not bypass.
-- Run `docker compose up -d && bash scripts/check-services.sh` before any integration test or verify step; all 5 checks (Redis, Postgres, pgvector, pg_trgm, Langfuse) must pass.
-- Cost governor + kill-switch API are load-bearing — changes to `AGENT_HOURLY_CAP_USD` paths or `LIVESTREAM_KILL_MODE` need coordinated updates across orchestrator + livestream wiring.
-- Reasoning Gemmas (`gemma-4-26b-a4b`) emit empty content — use `gemma-4-e4b` for local sims.
-- Headless sim snapshots must use `--output-dir snapshots/headless` so dashboard can serve artifacts.
+- **Never commit `.env`** — holds OpenRouter, Twitch/YouTube stream keys, DB/Redis URLs, kill-switch key.
+- **`specs/` is read-only reference** — do not modify design specs as part of feature work.
+- **Content filter is mandatory:** every agent output must pass through the Management content filter (3s delay) before TTS — don't bypass it.
+- **External comms require human approval** (social posts, emails) for the first 3 months; cost governor + kill switch must stay wired into every API call path.
+- **Memory tiers must stay coherent:** Core (in-prompt), Recall (pgvector), Archival (never deleted) — archival transcripts must not be pruned.
+- **Local sims:** use `gemma-4-e4b` (reasoning Gemmas emit empty content); pass `--output-dir snapshots/headless` so the dashboard serves artifacts.
 
 ## Active State
 - Test status: (will be filled in by the loop)

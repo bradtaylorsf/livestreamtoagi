@@ -112,7 +112,7 @@ pipeline:
 
 # === Batch mode =============================================================
 batch: true
-batch_size: 2
+batch_size: 1
 
 # === Post-session review ====================================================
 # Holistic review + security scan of the full session diff (uses `review_model`

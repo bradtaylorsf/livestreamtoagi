@@ -32,15 +32,21 @@
 #   LOCAL_LLM_MODEL=<model-id-from-LM-Studio>
 #   LOCAL_LLM_MODEL_BUILDING=<larger-local-model-id-if-available>
 #   EMBEDDING_PROVIDER=deterministic
+#   # The model triple above is resolved at LAUNCH from .env, not regenerated.
+#   # .env always wins over a stale parent-shell `export LOCAL_LLM_MODEL=...`.
 #   CONVERSATION_MODE=embodied          # or director_v2 for Director V2 prompt gating
 #   MINECRAFT_BRIDGE_TOKEN=<same secret the backend reads>
 #
 # Optional in .env:
+#   LOCAL_LLM_EMBEDDING_MODEL=text-embedding-nomic-embed-text-v1.5  # staged embedding id
 #   MC_SIM_MANAGEMENT_POLICY=off      # off, shadow, enforce
 #   MC_SIM_DISABLE_MANAGEMENT=1       # deprecated alias for policy=off
 #   MC_SIM_INCLUDE_BRIDGE_BOT=0
 #   MC_SIM_BLOCK_PRIVATE_CONVERSATIONS=1
-#   MC_SIM_BUILD_MODE=single          # single, plan, or settlement for phased !planAndBuild
+#   MC_SIM_BUILD_MODE=single          # single, plan, settlement, or emergent
+#                                      # plan/settlement use phased !planAndBuild;
+#                                      # emergent is the task-board build mode and
+#                                      # the default for the *-director subcommands.
 #   MC_SIM_BUILDER_PROVIDER=local     # local or openrouter; plan generation only
 #                                      # optional OpenRouter-builder mode is scoped
 #                                      # to !planAndBuild; chat remains local.
@@ -139,11 +145,18 @@ load_env_file() {
                 ;;
         esac
 
-        # The management policy must be bidirectional for hermetic sim tests:
-        # a stale parent-shell value should not override an explicit .env value.
+        # The management policy and the local-model triple must be bidirectional
+        # for hermetic sim tests and trustworthy model swaps: a stale parent-shell
+        # value (e.g. a LOCAL_LLM_MODEL left exported from a prior run) must not
+        # silently override an explicit .env value, which is the single source of
+        # truth for the local-dev path. Every other key keeps the
+        # set-only-if-unset rule so real parent-shell overrides still win.
         if [ "$key" = "MC_SIM_DISABLE_MANAGEMENT" ] \
            || [ "$key" = "MC_SIM_MANAGEMENT_POLICY" ] \
            || [ "$key" = "MINECRAFT_MANAGEMENT_REVIEW_MODE" ] \
+           || [ "$key" = "LOCAL_LLM_MODEL" ] \
+           || [ "$key" = "LOCAL_LLM_MODEL_BUILDING" ] \
+           || [ "$key" = "LOCAL_LLM_EMBEDDING_MODEL" ] \
            || [ -z "${!key+x}" ]; then
             case "$value" in
                 \"*\")
@@ -222,6 +235,9 @@ case "$mode" in
         DIRECTOR_V2_GATE="1"
         SOAK_PROFILE="director_v2"
         soak_profile_args=("--profile" "director_v2")
+        # Overnight operator default: emergent task-board build mode (E21-7c).
+        # An explicit MC_SIM_BUILD_MODE still wins via the :- expansion.
+        MC_SIM_BUILD_MODE="${MC_SIM_BUILD_MODE:-emergent}"
         shift || true
         ;;
     soak-director|director-soak|acceptance-director)
@@ -230,6 +246,9 @@ case "$mode" in
         DIRECTOR_V2_GATE="1"
         SOAK_PROFILE="director_v2"
         soak_profile_args=("--profile" "director_v2")
+        # Overnight operator default: emergent task-board build mode (E21-7c).
+        # An explicit MC_SIM_BUILD_MODE still wins via the :- expansion.
+        MC_SIM_BUILD_MODE="${MC_SIM_BUILD_MODE:-emergent}"
         shift || true
         ;;
     --*)
@@ -249,8 +268,19 @@ export PATH
 
 LOCAL_LLM_BASE_URL="${LOCAL_LLM_BASE_URL:-http://localhost:1234/v1}"
 LOCAL_LLM_MODEL_BUILDING="${LOCAL_LLM_MODEL_BUILDING:-${LOCAL_LLM_MODEL:-}}"
-export LOCAL_LLM_BASE_URL LOCAL_LLM_MODEL_BUILDING
+LOCAL_LLM_EMBEDDING_MODEL="${LOCAL_LLM_EMBEDDING_MODEL:-text-embedding-nomic-embed-text-v1.5}"
+export LOCAL_LLM_BASE_URL LOCAL_LLM_MODEL_BUILDING LOCAL_LLM_EMBEDDING_MODEL
 MC_SIM_BUILD_MODE="${MC_SIM_BUILD_MODE:-single}"
+# Authoritative MC_SIM_BUILD_MODE enum. The director subcommands above default
+# to emergent; bare smoke/soak and direct callers default to single. Reject any
+# other value with a clear message and exit code 2.
+case "$MC_SIM_BUILD_MODE" in
+    single|plan|settlement|emergent) ;;
+    *)
+        fail "MC_SIM_BUILD_MODE must be single, plan, settlement, or emergent."
+        exit 2
+        ;;
+esac
 MC_SIM_BUILDER_PROVIDER="${MC_SIM_BUILDER_PROVIDER:-local}"
 MC_SIM_BUILDER_FALLBACK="${MC_SIM_BUILDER_FALLBACK:-fail}"
 MC_SIM_BUILDER_OPENROUTER_API_KEY="${MC_SIM_BUILDER_OPENROUTER_API_KEY:-${OPENROUTER_API_KEY:-}}"
@@ -441,6 +471,20 @@ fi
 if [ "$MC_SIM_BUILD_MODE" = "settlement" ]; then
     DEFAULT_MC_SIM_INIT_MESSAGE="You are beginning a local Minecraft multi-phase settlement build in an easy starter meadow. Complete these settlement objectives in order: ${MC_SIM_SETTLEMENT_OBJECTIVES}. Use exactly one !planAndBuild request per active phase. Rotate the build owner after a completed, blocked, cooldown, stale, or capped phase; non-owners should only support through chat, inventory/resource checks, guarding, or clearing instructions from the owner. Good phase requests are \"small shared cabin\", \"simple wall\", \"workshop station\", and \"garden plot\". Do not repeat the starter cabin for later non-cabin additions."
 fi
+# Emergent mode (E21-7c): personality-first, task-board-mediated build. Agents
+# wake in the meadow with NO assigned objective list and NO env-assigned build
+# owner. They observe, propose tasks on the shared task board, claim the one
+# that best fits them, execute, and report; roles and shared goals EMERGE from
+# discussion. This mirrors scenarios/open_settlement_smoke.yaml's high-level
+# civilization seed (no fixed blueprint). Build authorization in emergent is a
+# claimed in_progress task on the shared board (E21-7a/E21-7b via the task tool
+# / claim_ownership), NOT an env owner or a single-owner !planAndBuild gate.
+# Intentionally omits the ordered-objective list, "rotate the build owner", the
+# "small shared cabin" literal, and !planAndBuild() so the cabin-copycat loop
+# cannot re-form.
+if [ "$MC_SIM_BUILD_MODE" = "emergent" ]; then
+    DEFAULT_MC_SIM_INIT_MESSAGE="You wake in an easy starter meadow with a starter kit already in your inventory and 7 other characters nearby. There is NO assigned task list and no preset blueprint: a shared civilization is yours to start together. Run this loop every turn: (1) OBSERVE — use !inventory, !nearbyBlocks, and !manageTask(\"list\") to read the shared task board and see what others are doing. (2) PROPOSE — when you see work worth doing, add it to the shared board with !manageTask(\"create\", \"<short task title>\") so everyone can see it. (3) CLAIM — take the single open task that best fits your personality and strengths with !manageTask(\"claim\", \"<task id>\"); claiming it IS your approval to start, so prefer claiming an existing open task over duplicating one. (4) EXECUTE — do the work with visible commands: use !planAndBuild(\"<what to build>\") to construct a real coherent structure, or !placeHere(\"oak_log\")/!placeHere(\"cobblestone\") for quick markers, plus any ownership or trade tools you have. (5) REPORT — when finished, call !manageTask(\"complete\", \"<task id>\") and say what you built in public chat so others can build on it. Distinct roles and shared objectives should EMERGE from your discussion, not from any fixed instruction. Divide the work so different agents pursue different tasks, coordinate in ordinary public chat, and keep actions safe and visible until the run ends."
+fi
 MC_SIM_INIT_MESSAGE="${MC_SIM_INIT_MESSAGE:-$DEFAULT_MC_SIM_INIT_MESSAGE}"
 SOAK_INIT_MESSAGE="${SOAK_INIT_MESSAGE:-$MC_SIM_INIT_MESSAGE}"
 if [ "$SOAK_BLOCK_PRIVATE_CONVERSATIONS" = "1" ]; then
@@ -454,6 +498,11 @@ fi
 if [ "$MC_SIM_EASY_MODE" = "1" ]; then
     if [ "$MC_SIM_BUILD_MODE" = "plan" ] || [ "$MC_SIM_BUILD_MODE" = "settlement" ]; then
         EASY_MODE_GUIDANCE="Easy-mode rules: stay inside the glass starter meadow, use the starter kit you already have, and build one coherent shared structure before doing more resource collection. Only the build owner should place blocks through !planAndBuild; support agents should coordinate in ordinary public Minecraft chat, check inventory or nearby resources when useful, and avoid standalone block placement unless the owner asks for help. Do not use !place, !placeHere, !break, !observe, or JSON/object command arguments in this local smoke."
+    elif [ "$MC_SIM_BUILD_MODE" = "emergent" ]; then
+        # E21-7g: emergent builders should make REAL structures via planAndBuild,
+        # not long lines of single !placeHere blocks. placeHere is for a first
+        # marker only; coordinate work through the shared task board.
+        EASY_MODE_GUIDANCE="Easy-mode rules: stay inside the glass starter meadow and use the starter kit you already have. Build REAL, coherent structures — a hut, wall, tower, well, garden, or workshop — NOT long lines of single blocks. When you take on a build, use one !planAndBuild(\"<the structure>\") to generate and place a whole structure, then let it finish before your next action. Use !placeHere only for a single quick camp marker on your very first turn, never as your main build method. Coordinate work through the shared task board (!manageTask) and ordinary public chat, and announce what you are building. Do not use !place, !break, !observe, or JSON/object command arguments in this local smoke."
     else
         EASY_MODE_GUIDANCE="Easy-mode rules: stay inside the glass starter meadow, use the starter kit you already have, and build something visible before doing more resource collection. On your first turn, send a short public chat sentence and then execute one visible command such as !placeHere(\"oak_log\") or !placeHere(\"cobblestone\"); do not wait for consensus before placing the first camp marker. Use ordinary public chat to announce roles, plans, progress, and requests for help. Useful building commands include !placeHere(\"oak_log\") and !placeHere(\"cobblestone\"). Do not use !place, !break, !observe, or JSON/object command arguments in this local smoke."
     fi
@@ -479,6 +528,24 @@ if [ "$MC_SIM_BUILD_MODE" = "plan" ] || [ "$MC_SIM_BUILD_MODE" = "settlement" ];
     esac
 fi
 export SOAK_INIT_MESSAGE
+
+# Test/diagnostic escape hatch: dump the resolved build mode and init message,
+# then exit 0 without requiring a full .env or launching anything. This runs
+# AFTER the build-mode validator (so a bad mode still exits 2) and BEFORE the
+# LLM/bridge checks, letting env assertions run without LM Studio/Minecraft.
+if [ "${MC_SIM_PRINT_ENV:-0}" = "1" ]; then
+    printf 'MC_SIM_BUILD_MODE=%s\n' "$MC_SIM_BUILD_MODE"
+    printf 'SOAK_INIT_MESSAGE=%s\n' "$SOAK_INIT_MESSAGE"
+    printf 'MC_SIM_SETTLEMENT_OWNER_ORDER=%s\n' "${MC_SIM_SETTLEMENT_OWNER_ORDER:-}"
+    printf 'MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST=%s\n' "${MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST:-}"
+    printf 'MC_SIM_BUILD_COOLDOWN_SEC=%s\n' "${MC_SIM_BUILD_COOLDOWN_SEC:-}"
+    # Resolved local-model triple — proves the .env value won over any stale
+    # exported parent-shell LOCAL_LLM_MODEL (the precedence fix above, #903) so
+    # the boot-profile criterion is testable without a live LM Studio stack.
+    printf 'LOCAL_LLM_MODEL=%s\n' "${LOCAL_LLM_MODEL:-}"
+    printf 'LOCAL_LLM_MODEL_BUILDING=%s\n' "${LOCAL_LLM_MODEL_BUILDING:-}"
+    exit 0
+fi
 
 if [ "${LLM_PROVIDER:-}" != "lmstudio" ]; then
     fail "LLM_PROVIDER must be lmstudio for the local Minecraft sim."
@@ -540,6 +607,7 @@ info "mode: ${mode}"
 info "duration: ${display_duration}h"
 info "model: ${LOCAL_LLM_MODEL}"
 info "build model: ${LOCAL_LLM_MODEL_BUILDING}"
+info "embedding model: ${LOCAL_LLM_EMBEDDING_MODEL}"
 info "conversation mode: ${CONVERSATION_MODE}"
 info "Director V2 gate: ${DIRECTOR_V2_GATE}"
 info "soak profile: ${SOAK_PROFILE}"

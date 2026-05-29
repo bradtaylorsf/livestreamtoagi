@@ -18,6 +18,9 @@ const DEFAULT_TOOLS = Object.freeze([
     '!inventory',
     '!searchForBlock',
     '!rescue',
+    // E21-7g: the shared task board (create/claim/complete/list) is a safe bridge
+    // op every selected agent may use, so it must be granted by the director gate.
+    '!manageTask',
 ]);
 const LOCAL_SAFE_TOOLS = new Set([
     '!move',
@@ -28,6 +31,7 @@ const LOCAL_SAFE_TOOLS = new Set([
     '!craftable',
     '!getCraftingPlan',
     '!rescue',
+    '!manageTask', // E21-7g shared task board (safe, no world mutation)
 ]);
 const GATHER_TOOLS = new Set(['!collectBlocks', '!collectAllBlocks']);
 const STANDALONE_BUILD_TOOLS = new Set(['!placeHere', '!place', '!break', '!buildFromPlan']);
@@ -381,6 +385,12 @@ function commandPolicy(verdict) {
     }
     if (String(verdict.scene_digest || '').toLowerCase().includes('distress')) {
         return 'Command policy: Distress response. If !rescue is available and another agent is endangered, use one concise !rescue request. Otherwise use ordinary chat, !inventory, or !nearbyBlocks.';
+    }
+    if (process.env.MC_SIM_BUILD_MODE === 'emergent') {
+        // E21-7g: steer emergent turns to the shared task board instead of lines
+        // of single !placeHere blocks. (Broad claim-based planAndBuild rights are
+        // tracked in E21-7h; the rotating build owner already gets planAndBuild.)
+        return 'Command policy: run the shared task-board loop — !manageTask("list") to read the board, !manageTask("create","<task>") to propose work, !manageTask("claim","<id>") to take a task, !manageTask("complete","<id>") when done — and coordinate in public chat. Build real coherent structures, not lines of single blocks; use !placeHere only for a single quick marker, and !inventory/!nearbyBlocks/!searchForBlock for information. Do not use !place, !break, !observe, !navigate, !executeCode, or JSON/object arguments in local smoke.';
     }
     return 'Command policy: prefer one visible safe command: !placeHere("oak_log"), !placeHere("cobblestone"), or !move("heartbeat-scout", "forward", 2). Use !inventory, !nearbyBlocks, or !searchForBlock only when you need information. Do not use !place, !break, !observe, !navigate, !executeCode, or JSON/object arguments in local smoke.';
 }

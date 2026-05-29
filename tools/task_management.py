@@ -17,7 +17,13 @@ class ManageTaskTool(BaseTool):
     name = "manage_task"
     description = (
         "Manage the shared task board. Actions: list_tasks, create_task, "
-        "claim_task, update_status. Use this to coordinate work with other agents."
+        "claim_task, update_status. Use this to coordinate work with other agents. "
+        "create_task posts an OPEN, unowned proposal that any agent can claim "
+        "(pass claim=true to claim it for yourself on creation). claim_task is "
+        "first-claim-wins: exactly one agent wins a contested task and the loser "
+        "is told who took it. In headless runs there is no audience, so claiming "
+        "an in-progress task IS the approval — claiming auto-approves the work; "
+        "there is no consensus or audience gate."
     )
     parameters = {
         "action": {
@@ -28,6 +34,14 @@ class ManageTaskTool(BaseTool):
         "title": {
             "type": "string",
             "description": "Task title (required for create_task)",
+            "optional": True,
+        },
+        "claim": {
+            "type": "boolean",
+            "description": (
+                "create_task only: immediately claim the new task for yourself "
+                "(owner=you, in_progress); default false = open proposal others can claim."
+            ),
             "optional": True,
         },
         "task_id": {
@@ -65,7 +79,7 @@ class ManageTaskTool(BaseTool):
             title = kwargs.get("title")
             if not title:
                 return {"status": "error", "reason": "title is required for create_task"}
-            return await self._create_task(title)
+            return await self._create_task(title, claim=bool(kwargs.get("claim", False)))
         elif action == "claim_task":
             task_id = kwargs.get("task_id")
             if not task_id:
@@ -100,23 +114,42 @@ class ManageTaskTool(BaseTool):
             ],
         }
 
-    async def _create_task(self, title: str) -> dict[str, Any]:
+    async def _create_task(self, title: str, claim: bool = False) -> dict[str, Any]:
         from core.shared_state import SharedTask
 
         task_id = f"task-{uuid.uuid4().hex[:8]}"
-        task = SharedTask(id=task_id, title=title, owner=self._agent_id)
+        if claim:
+            # Claim-on-create convenience: self-owned, immediately in progress.
+            task = SharedTask(
+                id=task_id,
+                title=title,
+                owner=self._agent_id,
+                status="in_progress",
+            )
+        else:
+            # Default: open, unowned proposal any agent can claim.
+            task = SharedTask(id=task_id, title=title)
         await self._shared_state.add_task(task)
-        return {"status": "ok", "task_id": task_id, "title": title, "owner": self._agent_id}
+        return {"status": "ok", "task_id": task_id, "title": title, "owner": task.owner}
 
     async def _claim_task(self, task_id: str) -> dict[str, Any]:
-        found = await self._shared_state.update_task_status(
-            task_id,
-            "in_progress",
-            owner=self._agent_id,
-        )
-        if not found:
-            return {"status": "error", "reason": f"Task {task_id!r} not found"}
-        return {"status": "ok", "task_id": task_id, "new_owner": self._agent_id}
+        """Atomically claim a task (first-claim-wins).
+
+        In headless runs there is no audience, so claiming an in-progress task IS
+        the approval — claiming auto-approves the work; there is no consensus or
+        audience gate. The loser of a contested claim is told who took it.
+        """
+        result = await self._shared_state.claim_task(task_id, self._agent_id)
+        status = result.get("status")
+        if status == "ok":
+            return {"status": "ok", "task_id": task_id, "new_owner": self._agent_id}
+        if status == "already_claimed":
+            return {
+                "status": "already_claimed",
+                "task_id": task_id,
+                "owner": result.get("owner"),
+            }
+        return {"status": "error", "reason": f"Task {task_id!r} not found"}
 
     async def _update_status(
         self,

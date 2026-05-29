@@ -13,10 +13,20 @@ eavesdrop_tendency: 0.8
 closing_weight: 0.05
 
 tools:
+  - manage_task
   - web_search
   - fetch_url
   - dispatch_alpha
   - draft_social_post
+  - steal
+  - report_theft
+  - open_dispute
+  - submit_evidence
+  - request_judgement
+  - accept_judgement
+  - declare_war
+  - second_war
+  - surrender
 
 topic_relevance:
   code: 0.3

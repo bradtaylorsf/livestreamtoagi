@@ -13,9 +13,28 @@ eavesdrop_tendency: 0.4
 closing_weight: 0.05
 
 tools:
+  - manage_task
   - execute_code
   - generate_tilemap
   - dispatch_alpha
+  - propose_trade
+  - accept_trade
+  - reject_trade
+  - list_pending_trades
+  - steal
+  - report_theft
+  - propose_treaty
+  - sign_treaty
+  - break_treaty
+  - defect_faction
+  - list_active_treaties
+  - open_dispute
+  - submit_evidence
+  - request_judgement
+  - accept_judgement
+  - declare_war
+  - second_war
+  - surrender
 
 topic_relevance:
   code: 0.7

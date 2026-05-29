@@ -415,6 +415,15 @@ function sharedStateEnabledByEnv() {
     return !isFalseLike(process.env.MC_SIM_SHARED_STATE_ENABLED || '1');
 }
 
+// #904: Completion-ratio bar shared with the Python ledger latch in
+// core/shared_state.py (advance_settlement_objective / _settlement_complete_ratio).
+// Both read MC_SIM_SETTLEMENT_COMPLETE_RATIO with the same 0.8 default so the JS
+// success check below and the Python positive latch cannot drift.
+function settlementCompleteRatio() {
+    const raw = Number.parseFloat(process.env.MC_SIM_SETTLEMENT_COMPLETE_RATIO || '');
+    return Number.isFinite(raw) && raw > 0 ? raw : 0.8;
+}
+
 async function readActiveSettlementObjective(agent, traceId) {
     if (process.env.MC_SIM_BUILD_MODE !== 'settlement' || !sharedStateEnabledByEnv()) {
         return null;
@@ -1329,6 +1338,44 @@ export const planAndBuildAction = {
             });
             return `plan-and-build skipped: ${staleReason}`;
         }
+        // #904: When the director macro carried no objective id (the overnight
+        // soak path -- #905 seeds objectives onto the blackboard but does not
+        // thread a macro objective through), source the objective id from the
+        // active blackboard objective so the success/blocked advance below can
+        // reach the bridge (writeSettlementObjective is gated on
+        // context.objectiveId). Only adopt an objective this agent already owns
+        // (or is director-authorized to reassign); an objective owned by a
+        // different agent is left untouched so the advance no-ops, preserving the
+        // owner-mismatch behavior. (staleSettlementReason above already
+        // short-circuits an owner mismatch -- this guard is defense in depth.)
+        if (
+            process.env.MC_SIM_BUILD_MODE === 'settlement' &&
+            !directorContext.objectiveId &&
+            activeObjective &&
+            typeof activeObjective === 'object'
+        ) {
+            const activeObjectiveId = activeObjective.objective_id || activeObjective.id || null;
+            const activeOwner = normalizedId(activeObjective.owner_agent_id);
+            const actor = normalizedId(agentId(agent));
+            const ownedByActor = !activeOwner || activeOwner === actor;
+            if (
+                activeObjectiveId &&
+                (ownedByActor ||
+                    directorAuthorizedReassignment(activeObjective, directorContext, agent))
+            ) {
+                directorContext.objectiveId = String(activeObjectiveId);
+                if (Number.isInteger(activeObjective.phase_index)) {
+                    directorContext.phaseIndex = activeObjective.phase_index;
+                }
+                const adoptedOwner = activeObjective.owner_agent_id || actor || null;
+                directorContext.phaseOwner = directorContext.phaseOwner || adoptedOwner;
+                directorContext.owner = directorContext.owner || adoptedOwner;
+                buildSettings.objective_id = directorContext.objectiveId;
+                if (Number.isInteger(directorContext.phaseIndex)) {
+                    buildSettings.phase_index = directorContext.phaseIndex;
+                }
+            }
+        }
         if (activeObjective?.description) {
             description = String(activeObjective.description);
         }
@@ -1627,11 +1674,43 @@ export const planAndBuildAction = {
             recordBuildFailed(agent, actionId, err && err.message ? err.message : String(err), {
                 reason: err && err.reason ? err.reason : undefined,
             });
+            // #904: The success/blocked advance below is unreachable once we
+            // re-throw, so a build exception used to leave the settlement
+            // objective silently stuck in_progress. Record a blocked advance
+            // (with the failure reason) on the ledger before propagating.
+            if (process.env.MC_SIM_BUILD_MODE === 'settlement' && directorContext.objectiveId) {
+                await writeSettlementObjective(
+                    agent,
+                    'settlement_objective_advance',
+                    directorContext,
+                    traceId,
+                    {
+                        description,
+                        owner:
+                            acquisition.active_build_owner ||
+                            directorContext.phaseOwner ||
+                            directorContext.owner,
+                        planId: actionId,
+                        status: 'blocked',
+                        reason: 'build_exception',
+                        evidence: {
+                            action_id: actionId,
+                            scene_id: buildPayload.scene_id,
+                            error: err && err.message ? err.message : String(err),
+                        },
+                    },
+                );
+            }
             throw err;
         }
         const metrics = executionMetrics(result);
+        // #904: The completion bar is the single source of truth shared with the
+        // Python ledger latch in core/shared_state.py (advance_settlement_objective);
+        // both read MC_SIM_SETTLEMENT_COMPLETE_RATIO via settlementCompleteRatio()
+        // and the matching default so the two cannot drift.
         const effectiveSuccess =
-            /\bsuccess\b/i.test(String(result || '')) || (metrics.completion_ratio || 0) >= 0.8;
+            /\bsuccess\b/i.test(String(result || '')) ||
+            (metrics.completion_ratio || 0) >= settlementCompleteRatio();
         const buildState = effectiveSuccess
             ? recordBuildCompleted(agent, actionId, result)
             : recordBuildFailed(agent, actionId, result);

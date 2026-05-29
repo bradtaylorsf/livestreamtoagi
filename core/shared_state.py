@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -13,6 +14,10 @@ if TYPE_CHECKING:
 
 
 TASK_KEY = "shared:tasks"
+# Per-task atomic claim marker namespace. A SET NX on
+# f"{TASK_CLAIM_KEY}:{task_id}" is the first-claim-wins primitive: exactly one
+# concurrent claimant sets the key, the rest observe it already exists.
+TASK_CLAIM_KEY = "shared:task_claim"
 DECISIONS_KEY = "shared:decisions"
 PRIORITIES_KEY = "shared:priorities"
 BUDGET_KEY = "shared:budget_status"
@@ -32,6 +37,14 @@ _MAX_RECENT_DANGERS = 25
 _MAX_RECENT_VERIFIED_ACTIONS = 25
 _MAX_NEXT_STEPS = 25
 _MAX_SETTLEMENT_OBJECTIVES = 12
+
+# Completion-ratio bar at/above which a settlement objective advance latches to
+# "completed" (see advance_settlement_objective). This is the single source of
+# truth for the completion bar; the JS success check in
+# scripts/minecraft/fork-src/agent/commands/plan_and_build_action.js
+# (settlementCompleteRatio()) reads the same MC_SIM_SETTLEMENT_COMPLETE_RATIO env
+# var with the same default, so the two bars cannot drift.
+_DEFAULT_SETTLEMENT_COMPLETE_RATIO = 0.8
 
 DANGER_KINDS = frozenset(
     {
@@ -61,7 +74,7 @@ def _loads(raw: str | bytes) -> dict:
 class SharedTask:
     id: str
     title: str
-    owner: str
+    owner: str | None = None  # None = open/unclaimed proposal any agent can claim
     status: str = "pending"  # pending, in_progress, done, blocked
     created_at: float = field(default_factory=time.time)
     blocked_reason: str | None = None
@@ -196,6 +209,58 @@ class SharedWorkingState:
                 await self.prune_completed_tasks()
             return True
         return False
+
+    async def claim_task(self, task_id: str, agent_id: str) -> dict[str, object]:
+        """Atomically claim an open task — first-claim-wins.
+
+        Returns one of:
+          - ``{"status": "ok", "owner": agent_id}`` — caller now owns the task
+            (newly claimed, or an idempotent re-claim by the current owner).
+          - ``{"status": "already_claimed", "owner": <other>}`` — another agent
+            holds it (or it is already done/completed); a no-op for the loser.
+          - ``{"status": "not_found"}`` — no such task.
+
+        Atomicity comes from a per-task SET NX marker
+        (``f"{TASK_CLAIM_KEY}:{task_id}"``): when two claims race, exactly one
+        sets the marker and writes ownership; the other re-reads the winner.
+        Status edits by the owner stay blind writes via ``update_task_status`` —
+        only first-ownership is contended.
+        """
+        raw = await self._redis.hget(TASK_KEY, task_id)
+        if not raw:
+            return {"status": "not_found"}
+
+        data = _loads(raw)
+        current_owner = data.get("owner")
+        current_status = data.get("status")
+
+        # A finished task can never be re-owned.
+        if current_status in ("done", "completed"):
+            return {"status": "already_claimed", "owner": current_owner}
+        # Re-claim by the current owner is idempotent.
+        if current_owner == agent_id:
+            return {"status": "ok", "owner": agent_id}
+        # Held by a different agent who is actively working it.
+        if current_owner and current_status in ("in_progress", "blocked"):
+            return {"status": "already_claimed", "owner": current_owner}
+
+        # Open (or merely pending) task — race for the atomic marker.
+        won = await self._redis.set(f"{TASK_CLAIM_KEY}:{task_id}", agent_id, nx=True)
+        if won:
+            await self.update_task_status(task_id, "in_progress", owner=agent_id)
+            return {"status": "ok", "owner": agent_id}
+
+        # Lost the race: the marker value IS the winner's id, written atomically
+        # by their SET NX. Read it directly rather than the task hash, whose
+        # owner field the winner may not have written yet (the owner write
+        # happens after SET NX, so a task re-read can briefly still show None).
+        winner = await self._redis.get(f"{TASK_CLAIM_KEY}:{task_id}")
+        if winner is None:
+            # Defensive fallback: marker vanished (e.g. cleared on release) —
+            # fall back to the persisted owner.
+            raw_after = await self._redis.hget(TASK_KEY, task_id)
+            winner = _loads(raw_after).get("owner") if raw_after else None
+        return {"status": "already_claimed", "owner": winner}
 
     async def get_tasks(self) -> list[SharedTask]:
         raw_all = await self._redis.hgetall(TASK_KEY)
@@ -478,6 +543,14 @@ class SharedWorkingState:
                 objective.verified_blocks = max(0, int(verified_blocks))
             if completion_ratio is not None:
                 objective.completion_ratio = max(0.0, min(float(completion_ratio), 1.0))
+            # #904 positive latch: once an advance carries a completion ratio at
+            # or above the bar, latch the objective to "completed" regardless of
+            # the requested status. A late or build-exception "blocked" advance
+            # that still cleared the bar must not leave the objective stuck
+            # in_progress. The demotion guard above already prevents a later
+            # lower-ratio advance from reverting an already-completed objective.
+            if objective.completion_ratio >= _settlement_complete_ratio():
+                objective.status = "completed"
             if evidence:
                 objective.evidence.update(evidence)
             if objective.status == "completed":
@@ -578,6 +651,19 @@ class SharedWorkingState:
                 f"status: {build_site.status}"
             )
 
+        # E21-7g: render the shared task board so agents can observe open work to
+        # claim and in-progress work to support (the emergent observe->claim loop).
+        tasks = await self.get_tasks()
+        active_tasks = [t for t in tasks if t.status != "done"]
+        if active_tasks:
+            open_tasks = [t for t in active_tasks if not t.owner or t.status == "pending"]
+            taken_tasks = [t for t in active_tasks if t.owner and t.status != "pending"]
+            lines.append("**Shared task board** (use !manageTask to propose/claim/complete):")
+            for task in open_tasks[:10]:
+                lines.append(f"  - [OPEN] {task.id}: {task.title} (unclaimed — claim it!)")
+            for task in taken_tasks[:10]:
+                lines.append(f"  - [{task.status}] {task.id}: {task.title} (owner: {task.owner})")
+
         claims = await self.get_agent_claims()
         if claims:
             lines.append("**Agent claims:**")
@@ -663,7 +749,8 @@ class SharedWorkingState:
             }
             for t in active[:8]:
                 icon = status_icons.get(t.status, "[?]")
-                line = f"  {icon} {t.title} (owner: {t.owner}, status: {t.status})"
+                owner = t.owner or "unassigned"
+                line = f"  {icon} {t.title} (owner: {owner}, status: {t.status})"
                 if t.blocked_reason:
                     line += f" -- blocked: {t.blocked_reason}"
                 lines.append(line)
@@ -683,6 +770,21 @@ def _normalize_danger_kind(kind: str) -> str:
     return text if text in DANGER_KINDS else "trapped"
 
 
+def _settlement_complete_ratio() -> float:
+    """Completion-ratio bar at/above which an advance latches to "completed".
+
+    Read at call time from ``MC_SIM_SETTLEMENT_COMPLETE_RATIO`` so the bar is
+    runtime-configurable and stays the single source of truth shared with the JS
+    success check (see ``_DEFAULT_SETTLEMENT_COMPLETE_RATIO``). Falls back to the
+    default for unset / non-numeric / non-positive values.
+    """
+    try:
+        raw = float(os.environ.get("MC_SIM_SETTLEMENT_COMPLETE_RATIO", ""))
+    except (TypeError, ValueError):
+        return _DEFAULT_SETTLEMENT_COMPLETE_RATIO
+    return raw if raw > 0 else _DEFAULT_SETTLEMENT_COMPLETE_RATIO
+
+
 def _normalize_objective_status(status: str) -> str:
     text = str(status or "").strip().lower().replace("-", "_").replace(" ", "_")
     valid = {
@@ -694,6 +796,7 @@ def _normalize_objective_status(status: str) -> str:
         "stale",
         "completed",
         "failed",
+        "abandoned",
     }
     return text if text in valid else "pending"
 

@@ -29,6 +29,9 @@
 #
 # Optional:
 #   LOCAL_LLM_MODEL_BUILDING    LM Studio building/code-tier model id.
+#   LOCAL_LLM_EMBEDDING_MODEL   LM Studio embedding model id staged into each
+#                               bot profile. Default:
+#                               text-embedding-nomic-embed-text-v1.5.
 #   LOCAL_LLM_BASE_URL          Effective OpenAI-compatible local endpoint.
 #                               Defaults to the LM queue proxy when enabled.
 #   LOCAL_LLM_UPSTREAM_URL      Actual LM Studio upstream used by the queue
@@ -227,6 +230,12 @@
 #   SOAK_REQUIRE_DIRECTOR_ACCEPTANCE
 #                               Exit nonzero when director_v2 acceptance fails.
 #                               Default: 1.
+#   SOAK_REQUIRE_EMERGENT_ACCEPTANCE
+#                               Exit nonzero when the emergent-mode acceptance
+#                               gate fails (MC_SIM_BUILD_MODE=emergent only).
+#                               Default: 0 (non-fatal; writes artifacts).
+#   emergent-acceptance.json/.md Emergent-mode acceptance gate verdict + criteria
+#                               under the run directory (emergent mode only).
 #   director-decisions.ndjson    Director V2 scene/open/close and gate decision
 #                               evidence under the run directory.
 #   tool-parity.ndjson          Director tool calls and documented no-tool
@@ -346,6 +355,17 @@ MC_SIM_BUILDER_MAX_USD_PER_RUN="${MC_SIM_BUILDER_MAX_USD_PER_RUN:-}"
 MC_SIM_BUILDER_USD_PER_1K_INPUT="${MC_SIM_BUILDER_USD_PER_1K_INPUT:-}"
 MC_SIM_BUILDER_USD_PER_1K_OUTPUT="${MC_SIM_BUILDER_USD_PER_1K_OUTPUT:-}"
 MC_SIM_BUILD_MODE="${MC_SIM_BUILD_MODE:-single}"
+# Mirror run-local-sim.sh's authoritative enum. Direct soak.sh callers still
+# default to single; the operator (emergent) default lives in run-local-sim.sh.
+# Settlement-only plumbing below stays inert under emergent (it gates on
+# = "settlement").
+case "$MC_SIM_BUILD_MODE" in
+    single|plan|settlement|emergent) ;;
+    *)
+        echo "x MC_SIM_BUILD_MODE must be single, plan, settlement, or emergent." >&2
+        exit 2
+        ;;
+esac
 MC_SIM_BUILD_MAX_PER_AGENT="${MC_SIM_BUILD_MAX_PER_AGENT:-6}"
 MC_SIM_BUILD_COOLDOWN_SEC="${MC_SIM_BUILD_COOLDOWN_SEC:-300}"
 MC_SIM_BUILD_ZONE_STRIDE="${MC_SIM_BUILD_ZONE_STRIDE:-12}"
@@ -390,6 +410,11 @@ SOAK_ACCEPTANCE_QUEUE_DEPTH_THRESHOLD="${SOAK_ACCEPTANCE_QUEUE_DEPTH_THRESHOLD:-
 SOAK_ACCEPTANCE_WARMUP_SECONDS="${SOAK_ACCEPTANCE_WARMUP_SECONDS:-300}"
 SOAK_ACCEPTANCE_MAX_SELECTED_AGENT_RATIO="${SOAK_ACCEPTANCE_MAX_SELECTED_AGENT_RATIO:-0.5}"
 SOAK_REQUIRE_DIRECTOR_ACCEPTANCE="${SOAK_REQUIRE_DIRECTOR_ACCEPTANCE:-1}"
+# Emergent-mode acceptance gate (E21-7e, #909). Non-fatal by default so the
+# overnight path produces emergent-acceptance.{json,md} artifacts without
+# failing the run while the emergent telemetry substrate matures. Set to 1 to
+# make the gate a hard requirement once decision_log.jsonl capture is proven.
+SOAK_REQUIRE_EMERGENT_ACCEPTANCE="${SOAK_REQUIRE_EMERGENT_ACCEPTANCE:-0}"
 MINECRAFT_ALLOW_DESTRUCTIVE_PATHS="${MINECRAFT_ALLOW_DESTRUCTIVE_PATHS:-1}"
 MC_HEARTBEAT_ENABLED="${MC_HEARTBEAT_ENABLED:-1}"
 MC_HEARTBEAT_TICK_MS="${MC_HEARTBEAT_TICK_MS:-5000}"
@@ -661,7 +686,7 @@ iso_from_epoch() {
 }
 
 verify_static() {
-    local problems=0 bot script profile
+    local problems=0 bot script profile profile_path
 
     [ -d "$SCRIPT_DIR" ] || { fail "missing scripts dir: $SCRIPT_DIR"; problems=1; }
 
@@ -674,12 +699,29 @@ verify_static() {
     done
 
     for profile in bridge alpha vera rex aurora pixel fork sentinel grok; do
-        if [ ! -s "$SCRIPT_DIR/profiles/${profile}-bot.json" ]; then
-            fail "profile missing or empty: $SCRIPT_DIR/profiles/${profile}-bot.json"
+        profile_path="$SCRIPT_DIR/profiles/${profile}-bot.json"
+        if [ ! -s "$profile_path" ]; then
+            fail "profile missing or empty: $profile_path"
             problems=1
-        elif grep -qi 'openrouter' "$SCRIPT_DIR/profiles/${profile}-bot.json"; then
-            fail "profile is not local-only: $SCRIPT_DIR/profiles/${profile}-bot.json"
+        elif grep -qi 'openrouter' "$profile_path"; then
+            fail "profile is not local-only: $profile_path"
             problems=1
+        else
+            # Committed profiles are launch-time templates: connect-cohort-bot.sh
+            # (and the alpha/bridge launchers) substitute these literal
+            # placeholders from $LOCAL_LLM_MODEL / $LOCAL_LLM_MODEL_BUILDING at
+            # launch. A hand-edited profile that lost a placeholder (e.g. a
+            # resolved model id committed by mistake) would pin the wrong model
+            # and trip the per-bot throw mid-launch, so fail the static gate here
+            # before any bot starts. Mirrors connect-cohort-bot.sh:285-286.
+            grep -q '"model": "lmstudio/__LOCAL_LLM_MODEL__"' "$profile_path" || {
+                fail "profile model placeholder drifted (expected \"lmstudio/__LOCAL_LLM_MODEL__\"): $profile_path"
+                problems=1
+            }
+            grep -q '"code_model": "lmstudio/__LOCAL_LLM_MODEL_BUILDING__"' "$profile_path" || {
+                fail "profile code_model placeholder drifted (expected \"lmstudio/__LOCAL_LLM_MODEL_BUILDING__\"): $profile_path"
+                problems=1
+            }
         fi
     done
 
@@ -766,6 +808,50 @@ verify_static() {
         problems=1
     }
 
+    # E21 keystone wiring: the settlement objective seed must be invoked before
+    # the launch_bot loop, gated to settlement mode, and share one exported
+    # LTAG_SIMULATION_ID with the bots. Patterns are anchored to the real wiring
+    # lines so they do not match these verification lines.
+    [ -s "$SCRIPT_DIR/seed_settlement_objectives.py" ] || {
+        fail "missing settlement objective seed script: $SCRIPT_DIR/seed_settlement_objectives.py"
+        problems=1
+    }
+    local soak_self="$SCRIPT_DIR/soak.sh" seed_line loop_line
+    seed_line="$(grep -nE '^[[:space:]]*run_checked "seed settlement objectives"' "$soak_self" | head -n1 | cut -d: -f1 || true)"
+    loop_line="$(grep -nE '^[[:space:]]*launch_bot ' "$soak_self" | head -n1 | cut -d: -f1 || true)"
+    if [ -n "$seed_line" ] && [ -n "$loop_line" ] && [ "$seed_line" -lt "$loop_line" ]; then
+        ok "settlement objective seed runs before bot launch ($seed_line < $loop_line)"
+    else
+        fail "settlement objective seed must be invoked before the launch_bot loop"
+        problems=1
+    fi
+    if grep -qF 'seed shared objective board' "$soak_self"; then
+        ok "settlement objective seed is gated to settlement mode"
+    else
+        fail "settlement objective seed settlement-mode gate missing"
+        problems=1
+    fi
+    if grep -qE '^[[:space:]]*export LTAG_SIMULATION_ID' "$soak_self"; then
+        ok "LTAG_SIMULATION_ID is exported for the seed and bots"
+    else
+        fail "LTAG_SIMULATION_ID export missing"
+        problems=1
+    fi
+
+    # E21-7e emergent acceptance gate: must invoke the report builder with the
+    # emergent flag and only fire under emergent mode so the settlement
+    # regression path stays untouched. Anchored to the call-site guard + status
+    # capture so this verification block does not self-match.
+    local emergent_flag_line emergent_guard_line
+    emergent_flag_line="$(grep -nE '^[[:space:]]+--mode emergent ' "$soak_self" | head -n1 | cut -d: -f1 || true)"
+    emergent_guard_line="$(grep -n '^[[:space:]]*run_emergent_acceptance_report ||' "$soak_self" | head -n1 | cut -d: -f1 || true)"
+    if [ -n "$emergent_flag_line" ] && [ -n "$emergent_guard_line" ]; then
+        ok "emergent acceptance gate invokes --mode emergent under an emergent-mode guard"
+    else
+        fail "emergent acceptance gate (--mode emergent, emergent-mode guarded) is missing"
+        problems=1
+    fi
+
     if [ "$problems" -eq 0 ]; then
         ok "Static soak verify passed: all launchers/profiles/docs are present"
     fi
@@ -792,6 +878,7 @@ print_plan() {
     fi
     info "chat model:     ${LOCAL_LLM_MODEL:-<unset>}"
     info "build model:    ${LOCAL_LLM_MODEL_BUILDING:-${LOCAL_LLM_MODEL:-<unset>}}"
+    info "embedding model: ${LOCAL_LLM_EMBEDDING_MODEL:-text-embedding-nomic-embed-text-v1.5}"
     info "builder route:  provider=${MC_SIM_BUILDER_PROVIDER} fallback=${MC_SIM_BUILDER_FALLBACK} openrouter_model=${MC_SIM_BUILDER_OPENROUTER_MODEL:-<unset>} caps run=${MC_SIM_BUILDER_MAX_CALLS_PER_RUN} agent=${MC_SIM_BUILDER_MAX_CALLS_PER_AGENT} usd=${MC_SIM_BUILDER_MAX_USD_PER_RUN:-<unset>}"
     info "build governor: max_per_agent=${MC_SIM_BUILD_MAX_PER_AGENT} cooldown=${MC_SIM_BUILD_COOLDOWN_SEC}s zone_stride=${MC_SIM_BUILD_ZONE_STRIDE} cache_ttl=${MC_SIM_BUILD_CACHE_TTL_SEC}s"
     info "plan builders:  ${MC_SIM_PLAN_BUILD_AGENT_ALLOWLIST:-<unrestricted>}"
@@ -1434,6 +1521,13 @@ if [ -z "${LOCAL_LLM_MODEL:-}" ]; then
     exit 1
 fi
 export LOCAL_LLM_MODEL_BUILDING="${LOCAL_LLM_MODEL_BUILDING:-$LOCAL_LLM_MODEL}"
+export LOCAL_LLM_EMBEDDING_MODEL="${LOCAL_LLM_EMBEDDING_MODEL:-text-embedding-nomic-embed-text-v1.5}"
+# Profiles are committed templates; the per-bot launchers resolve the
+# __LOCAL_LLM_MODEL__ / __LOCAL_LLM_MODEL_BUILDING__ placeholders at launch from
+# these values (we never regenerate them via gen_profiles.py). Emit one
+# authoritative line so operators and tests can confirm which model the staged
+# bots will actually serve for this run.
+info "Bot profiles refreshed for LOCAL_LLM_MODEL=${LOCAL_LLM_MODEL}"
 preflight_builder_routing || exit $?
 
 if [ -z "${MINECRAFT_BRIDGE_TOKEN:-}" ]; then
@@ -1477,6 +1571,16 @@ if [ ! -d "$MINDCRAFT_BASE_ABS/node_modules" ]; then
 fi
 
 RUN_ID="$(date -u '+%Y%m%dT%H%M%SZ')"
+# One explicit simulation scope shared by the objective seed step and every bot.
+# python_bridge.js / memory_context.js resolve their Redis scope from
+# LTAG_SIMULATION_ID (falling back to the all-zero default), so the seed and the
+# bots MUST agree on a single UUID or the seed writes to a scope no bot reads.
+if [ -z "${LTAG_SIMULATION_ID:-}" ]; then
+    LTAG_SIMULATION_ID="$("${PYTHON:-python3}" -c \
+        'import sys, uuid; print(uuid.uuid5(uuid.NAMESPACE_URL, "ltag-soak/" + sys.argv[1]))' \
+        "$RUN_ID")"
+fi
+export LTAG_SIMULATION_ID
 mkdir -p "$SOAK_LOG_ROOT"
 SOAK_LOG_ROOT="$(cd -- "$SOAK_LOG_ROOT" && pwd)"
 RUN_DIR="$SOAK_LOG_ROOT/$RUN_ID"
@@ -1515,6 +1619,7 @@ run_checked() {
 write_metadata() {
     {
         echo "run_id=$RUN_ID"
+        echo "ltag_simulation_id=$LTAG_SIMULATION_ID"
         echo "start_utc=$SOAK_START_ISO"
         echo "planned_end_utc=$SOAK_PLANNED_END_ISO"
         echo "duration_hours=$SOAK_DURATION_HOURS"
@@ -1538,6 +1643,7 @@ write_metadata() {
         echo "minecraft_llm_proxy_port=$MINECRAFT_LLM_PROXY_PORT"
         echo "local_llm_model=$LOCAL_LLM_MODEL"
         echo "local_llm_model_building=$LOCAL_LLM_MODEL_BUILDING"
+        echo "local_llm_embedding_model=${LOCAL_LLM_EMBEDDING_MODEL:-text-embedding-nomic-embed-text-v1.5}"
         echo "llm_smoke_timeout_seconds=$SOAK_LLM_SMOKE_TIMEOUT_SECONDS"
         echo "soak_profile=$SOAK_PROFILE"
         echo "builder_provider=$MC_SIM_BUILDER_PROVIDER"
@@ -1947,13 +2053,14 @@ launch_bot() {
         cd "$REPO_ROOT"
         export MINDCRAFT_DIR="$worktree"
         export MINDSERVER_PORT="$mindserver_port"
-        export LOCAL_LLM_MODEL LOCAL_LLM_MODEL_BUILDING LOCAL_LLM_BASE_URL LOCAL_LLM_UPSTREAM_URL
+        export LOCAL_LLM_MODEL LOCAL_LLM_MODEL_BUILDING LOCAL_LLM_EMBEDDING_MODEL LOCAL_LLM_BASE_URL LOCAL_LLM_UPSTREAM_URL
         export MINECRAFT_LLM_QUEUE_PROXY MINECRAFT_LLM_CONCURRENCY
         export MINECRAFT_BRIDGE_URL MINECRAFT_BRIDGE_TOKEN
         export MC_RUN_DIR="$RUN_DIR"
         export MC_TIMELINE_NDJSON="$RUN_DIR/timeline-raw/$bot.ndjson"
         export MC_HOST MC_PORT
         export LTAG_RUN_ID="${LTAG_RUN_ID:-$RUN_ID}"
+        export LTAG_SIMULATION_ID="${LTAG_SIMULATION_ID:-}"
         export LTAG_SIM_AGENTS="$SOAK_BOTS"
         export MINECRAFT_ALLOW_DESTRUCTIVE_PATHS
         export MINECRAFT_SUPPRESS_EMPTY_INIT_CHAT
@@ -2550,6 +2657,39 @@ append_director_acceptance_summary() {
     } >> "$RUN_DIR/summary.txt"
 }
 
+run_emergent_acceptance_report() {
+    # Emergent-mode acceptance gate (E21-7e, #909). Gated to emergent mode so the
+    # settlement regression harness path is untouched. Reuses the Director V2
+    # report + the settlement smoke classifier over decision_log.jsonl under the
+    # run dir; emits emergent-acceptance.{json,md} alongside the soak artifacts.
+    [ "$MC_SIM_BUILD_MODE" = "emergent" ] || return 0
+    "${PYTHON:-python3}" "$SCRIPT_DIR/build_director_acceptance_report.py" \
+        --mode emergent \
+        --run-dir "$RUN_DIR" \
+        --sim-folder "$RUN_DIR" \
+        --queue-threshold "$SOAK_ACCEPTANCE_QUEUE_DEPTH_THRESHOLD" \
+        --warmup-seconds "$SOAK_ACCEPTANCE_WARMUP_SECONDS" \
+        --max-selected-agent-ratio "$SOAK_ACCEPTANCE_MAX_SELECTED_AGENT_RATIO"
+}
+
+append_emergent_acceptance_summary() {
+    local status="$1" status_label
+    [ "$MC_SIM_BUILD_MODE" = "emergent" ] || return 0
+    if [ "$status" -eq 0 ]; then
+        status_label="pass"
+    else
+        status_label="fail"
+    fi
+    {
+        echo
+        echo "Emergent mode acceptance"
+        echo "status: $status_label"
+        echo "report_json: $RUN_DIR/emergent-acceptance.json"
+        echo "report_md: $RUN_DIR/emergent-acceptance.md"
+        echo "require_emergent_acceptance: $SOAK_REQUIRE_EMERGENT_ACCEPTANCE"
+    } >> "$RUN_DIR/summary.txt"
+}
+
 start_lm_queue_proxy
 print_plan
 write_metadata
@@ -2572,6 +2712,14 @@ fi
 run_checked "backend health" "$RUN_DIR/preflight/backend-health.json" curl -fsS "$BACKEND_HEALTH_URL"
 
 start_log_capture
+
+# settlement-mode only: seed shared objective board the bots read (E21 keystone).
+# Emergent mode seeds nothing (owned by E21-7c). Runs after the docker-services
+# preflight (Redis confirmed up) and before any bot launches.
+if [ "$MC_SIM_BUILD_MODE" = "settlement" ]; then
+    run_checked "seed settlement objectives" "$RUN_DIR/preflight/seed-settlement-objectives.txt" \
+        env MC_RUN_DIR="$RUN_DIR" "${PYTHON:-python3}" "$SCRIPT_DIR/seed_settlement_objectives.py"
+fi
 
 BOT_INDEX=0
 for bot in $SOAK_BOTS; do
@@ -2612,6 +2760,11 @@ if [ "$SOAK_PROFILE" = "director_v2" ]; then
     run_director_acceptance_report || ACCEPTANCE_STATUS=$?
     append_director_acceptance_summary "$ACCEPTANCE_STATUS"
 fi
+EMERGENT_ACCEPTANCE_STATUS=0
+if [ "$MC_SIM_BUILD_MODE" = "emergent" ]; then
+    run_emergent_acceptance_report || EMERGENT_ACCEPTANCE_STATUS=$?
+    append_emergent_acceptance_summary "$EMERGENT_ACCEPTANCE_STATUS"
+fi
 
 EXCEEDED="$(cat "$RUN_DIR/cost-cap-exceeded.count" 2> /dev/null || echo 1)"
 BEHAVIOR_GATE_STATUS="$(cat "$RUN_DIR/behavior-gate-status.txt" 2> /dev/null || echo fail)"
@@ -2637,6 +2790,10 @@ if [ "$SOAK_REQUIRE_BEHAVIOR_GATE" = "1" ] && [ "$BEHAVIOR_GATE_STATUS" != "pass
 fi
 if [ "$SOAK_PROFILE" = "director_v2" ] && [ "$SOAK_REQUIRE_DIRECTOR_ACCEPTANCE" = "1" ] && [ "$ACCEPTANCE_STATUS" -ne 0 ]; then
     fail "Director V2 acceptance failed. See $RUN_DIR/acceptance-report.md"
+    exit 1
+fi
+if [ "$MC_SIM_BUILD_MODE" = "emergent" ] && [ "$SOAK_REQUIRE_EMERGENT_ACCEPTANCE" = "1" ] && [ "$EMERGENT_ACCEPTANCE_STATUS" -ne 0 ]; then
+    fail "Emergent mode acceptance failed. See $RUN_DIR/emergent-acceptance.md"
     exit 1
 fi
 if [ "$BEHAVIOR_GATE_STATUS" != "pass" ]; then

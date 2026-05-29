@@ -588,6 +588,22 @@ class SimulationOrchestrator:
             build_plan_resolver=build_plan_resolver,
         )
         self._decision_logger: Any | None = None
+        # Per-sim ownership ledger (#891). Instantiated in ``run`` once the
+        # sim_folder is known so tools can persist to
+        # <sim>/ownership_log.jsonl and mirror events into the decision log.
+        self._ownership_ledger: Any | None = None
+        # Per-sim trade ledger (#892) — same pattern, persists to
+        # <sim>/trade_log.jsonl via the trade tools.
+        self._trade_ledger: Any | None = None
+        # Per-sim theft ledger (#893) — shares the trade ledger's inventory
+        # model; persists to <sim>/theft_log.jsonl via the steal tools.
+        self._theft_ledger: Any | None = None
+        # Per-sim diplomacy ledger (#894) — tracks factions + treaties;
+        # persists to <sim>/diplomacy_log.jsonl via the diplomacy tools.
+        self._diplomacy_ledger: Any | None = None
+        # Per-sim conflict ledger (#895) — disputes + wars with consequences
+        # routed through the other civilization ledgers.
+        self._conflict_ledger: Any | None = None
         # Event-bus callbacks the orchestrator registers to mirror live
         # events into the decision log (issue #859). Stored so _finalize can
         # unsubscribe cleanly.
@@ -947,6 +963,12 @@ class SimulationOrchestrator:
             conversation_mode=self._config.conversation_mode,
             embodiment_executor=self._executor,
             sim_folder=getattr(self, "_sim_folder", None),
+            ownership_ledger=getattr(self, "_ownership_ledger", None),
+            trade_ledger=getattr(self, "_trade_ledger", None),
+            theft_ledger=getattr(self, "_theft_ledger", None),
+            diplomacy_ledger=getattr(self, "_diplomacy_ledger", None),
+            conflict_ledger=getattr(self, "_conflict_ledger", None),
+            decision_logger=self._decision_logger,
         )
 
     def _idle_gap(self) -> timedelta:

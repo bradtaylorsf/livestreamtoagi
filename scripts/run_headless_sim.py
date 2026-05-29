@@ -245,6 +245,46 @@ async def run_headless(args: argparse.Namespace) -> None:
 
     orchestrator._sim_folder = sim_folder
     orchestrator._decision_logger = DecisionLogger(sim_folder)
+    # Per-sim ownership ledger (#891) — replays existing
+    # <sim>/ownership_log.jsonl so resumed runs inherit prior claims.
+    from core.civilization.ownership import OwnershipLedger
+    from core.civilization.trade import TradeLedger
+
+    orchestrator._ownership_ledger = OwnershipLedger(sim_folder)
+    # Per-sim trade ledger (#892) — replays <sim>/trade_log.jsonl.
+    orchestrator._trade_ledger = TradeLedger(sim_folder)
+    # Per-sim theft ledger (#893) — shares the trade inventory model and
+    # replays <sim>/theft_log.jsonl.
+    from core.civilization.theft import TheftLedger
+
+    orchestrator._theft_ledger = TheftLedger(
+        sim_folder,
+        trade_ledger=orchestrator._trade_ledger,
+        ownership_ledger=orchestrator._ownership_ledger,
+        simulation_id=args.sim_id or name,
+    )
+    # Per-sim diplomacy ledger (#894) — seeds factions from the scenario
+    # YAML's ``factions:`` block and replays <sim>/diplomacy_log.jsonl.
+    from core.civilization.diplomacy import DiplomacyLedger
+
+    orchestrator._diplomacy_ledger = DiplomacyLedger(
+        sim_folder,
+        simulation_id=args.sim_id or name,
+        factions=sim_config.factions,
+    )
+    # Per-sim conflict ledger (#895) — disputes + wars; references the
+    # prior civilization ledgers so consequence routing lands in the
+    # right subsystem.
+    from core.civilization.conflict import ConflictLedger
+
+    orchestrator._conflict_ledger = ConflictLedger(
+        sim_folder,
+        simulation_id=args.sim_id or name,
+        diplomacy_ledger=orchestrator._diplomacy_ledger,
+        ownership_ledger=orchestrator._ownership_ledger,
+        trade_ledger=orchestrator._trade_ledger,
+        theft_ledger=orchestrator._theft_ledger,
+    )
 
     loop = asyncio.get_running_loop()
 

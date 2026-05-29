@@ -201,6 +201,24 @@ class ConversationEngine:
         # propose_build (and any future executor-aware tool) records intents
         # to the active sim folder and routes to Director V2 in embodied runs.
         self._embodiment_executor = options.embodiment_executor
+        self._sim_folder = options.sim_folder
+        # Civilization ownership ledger + decision logger (#891). Both flow
+        # through to build_agent_tools so the claim/release tools can
+        # persist to <sim>/ownership_log.jsonl and the decision log.
+        self._ownership_ledger = options.ownership_ledger
+        # Civilization trade ledger (#892) — persists pending/accepted
+        # trades to <sim>/trade_log.jsonl via the trade tools.
+        self._trade_ledger = options.trade_ledger
+        # Civilization theft ledger (#893) — shares the trade inventory
+        # model, persists to <sim>/theft_log.jsonl via the steal tools.
+        self._theft_ledger = options.theft_ledger
+        # Civilization diplomacy ledger (#894) — tracks factions + treaties,
+        # persists to <sim>/diplomacy_log.jsonl via the diplomacy tools.
+        self._diplomacy_ledger = options.diplomacy_ledger
+        # Civilization conflict ledger (#895) — disputes + war intents,
+        # persists to <sim>/conflict_log.jsonl via the conflict tools.
+        self._conflict_ledger = options.conflict_ledger
+        self._decision_logger = options.decision_logger
 
         # Conversation progression tracking (#248)
         self._dialogue_only_streak: int = 0
@@ -1130,6 +1148,13 @@ class ConversationEngine:
                 self._services,
                 simulation_mode=self._simulation_mode,
                 embodiment_executor=self._embodiment_executor,
+                sim_folder=self._sim_folder,
+                ownership_ledger=self._ownership_ledger,
+                trade_ledger=self._trade_ledger,
+                theft_ledger=self._theft_ledger,
+                diplomacy_ledger=self._diplomacy_ledger,
+                conflict_ledger=self._conflict_ledger,
+                decision_logger=self._decision_logger,
             )
             logger.debug(
                 "Built %d tools for agent %s",

@@ -19,6 +19,7 @@ ToolCategory = Literal[
     "alliance",
     "audience",
     "character",
+    "civilization",
     "code",
     "economy",
     "email",
@@ -299,6 +300,237 @@ TOOL_PARITY: dict[str, ToolParityEntry] = {
             "comparison until the screenshot matches the source image."
         ),
         linked_issue="#861",
+    ),
+    "claim_ownership": ToolParityEntry(
+        name="claim_ownership",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale=(
+            "First-claim-wins ownership ledger is internal civilization "
+            "state; Director V2 can route claims through the same backend "
+            "ledger without external publication."
+        ),
+        linked_issue="#891",
+    ),
+    "release_ownership": ToolParityEntry(
+        name="release_ownership",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale=(
+            "Releases mutate the same internal ownership ledger and never touch external systems."
+        ),
+        linked_issue="#891",
+    ),
+    "get_ownership": ToolParityEntry(
+        name="get_ownership",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale="Read-only ownership lookup for prompt context.",
+        linked_issue="#891",
+    ),
+    "list_my_claims": ToolParityEntry(
+        name="list_my_claims",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale="Read-only introspection over the caller's own claims.",
+        linked_issue="#891",
+    ),
+    "propose_trade": ToolParityEntry(
+        name="propose_trade",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale=(
+            "Pairwise trade proposal: writes a pending offer to the internal "
+            "trade ledger and emits a decision-log event. Never publishes "
+            "externally."
+        ),
+        linked_issue="#892",
+    ),
+    "accept_trade": ToolParityEntry(
+        name="accept_trade",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale=(
+            "Recipient acceptance atomically swaps two inventories and "
+            "(when included) transfers container ownership through the "
+            "shared ownership ledger."
+        ),
+        linked_issue="#892",
+    ),
+    "reject_trade": ToolParityEntry(
+        name="reject_trade",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale=("Recipient rejection records the reason on the offer; no external publication."),
+        linked_issue="#892",
+    ),
+    "list_pending_trades": ToolParityEntry(
+        name="list_pending_trades",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale="Read-only introspection over offers awaiting this agent's reply.",
+        linked_issue="#892",
+    ),
+    "steal": ToolParityEntry(
+        name="steal",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale=(
+            "Attempt to take items from another agent's container. The "
+            "theft ledger rolls a deterministic detection check and, on "
+            "detection, emits relationship-delta consequences for the "
+            "victim and any in-range witnesses. Never publishes externally."
+        ),
+        linked_issue="#893",
+    ),
+    "report_theft": ToolParityEntry(
+        name="report_theft",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale=(
+            "Witness-driven promotion of a prior undetected theft attempt "
+            "to detected; fires the same consequence path as a detected "
+            "attempt at roll time."
+        ),
+        linked_issue="#893",
+    ),
+    "propose_treaty": ToolParityEntry(
+        name="propose_treaty",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale=(
+            "Open a treaty between the proposer's faction and another. "
+            "The diplomacy ledger persists per sim; no external publish."
+        ),
+        linked_issue="#894",
+    ),
+    "sign_treaty": ToolParityEntry(
+        name="sign_treaty",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale=(
+            "Counterparty member activates a proposed treaty; pure local "
+            "ledger mutation with an audit row."
+        ),
+        linked_issue="#894",
+    ),
+    "break_treaty": ToolParityEntry(
+        name="break_treaty",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale=(
+            "Withdraw from an active treaty; emits relationship-delta "
+            "trust hits for every other party's members."
+        ),
+        linked_issue="#894",
+    ),
+    "defect_faction": ToolParityEntry(
+        name="defect_faction",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale=(
+            "Move an agent between scenario factions in the diplomacy "
+            "ledger and emit the audit row."
+        ),
+        linked_issue="#894",
+    ),
+    "list_active_treaties": ToolParityEntry(
+        name="list_active_treaties",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale="Read-only introspection over the diplomacy ledger.",
+        linked_issue="#894",
+    ),
+    "open_dispute": ToolParityEntry(
+        name="open_dispute",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale=(
+            "File a formal dispute against another agent backed by evidence "
+            "refs from prior civilization logs; the conflict ledger persists "
+            "per sim and routes consequences to the right subsystem."
+        ),
+        linked_issue="#895",
+    ),
+    "submit_evidence": ToolParityEntry(
+        name="submit_evidence",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale=(
+            "Attach an additional evidence ref to an open dispute. Pure "
+            "ledger mutation with an audit row."
+        ),
+        linked_issue="#895",
+    ),
+    "request_judgement": ToolParityEntry(
+        name="request_judgement",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale=(
+            "Deterministic auto-judgement weighted by cross-referenced "
+            "evidence; same seed + evidence → same ruling."
+        ),
+        linked_issue="#895",
+    ),
+    "accept_judgement": ToolParityEntry(
+        name="accept_judgement",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale=(
+            "Losing party either accepts the judgement (consequences apply) "
+            "or escalates to war. Pure local ledger transitions."
+        ),
+        linked_issue="#895",
+    ),
+    "declare_war": ToolParityEntry(
+        name="declare_war",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale=(
+            "Open a war declaration; activates only after majority faction "
+            "quorum is reached via second_war."
+        ),
+        linked_issue="#895",
+    ),
+    "second_war": ToolParityEntry(
+        name="second_war",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale=(
+            "Faction member seconds a pending war; activates it once the quorum is reached."
+        ),
+        linked_issue="#895",
+    ),
+    "surrender": ToolParityEntry(
+        name="surrender",
+        module="tools.civilization",
+        category="civilization",
+        classification="callable_now",
+        rationale=(
+            "End a war or judged dispute by recording surrender terms. Local-only side effects."
+        ),
+        linked_issue="#895",
     ),
 }
 

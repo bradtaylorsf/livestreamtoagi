@@ -6,7 +6,7 @@
 
 A 24/7 livestreamed AI reality show: nine AI agents with distinct personalities live in a pixel-art world, build real projects, manage a real budget, and interact with audiences on Twitch and YouTube. The system is a Python backend (FastAPI + CrewAI) driving a Phaser.js world renderer, with a Next.js public website. Agents have three-tier memory (core/recall/archival), pass through a Management content filter before TTS, and are constrained by a cost governor with a kill switch.
 
-Agents are also embodied in Minecraft via a Mineflayer bridge — `propose_build` BuildScripts now stream to a live MC server over RCON (see `core/embodiment/` and `core/minecraft/`).
+Agents are also embodied in Minecraft via a Mineflayer bridge — `propose_build` BuildScripts stream to a live MC server over RCON (see `core/embodiment/` and `core/minecraft/`).
 
 See `specs/` for design references and `research/PAPER-INDEX.md` for prior art when working on any subsystem.
 
@@ -25,7 +25,7 @@ See `specs/` for design references and `research/PAPER-INDEX.md` for prior art w
 
 **Website (`website/`)** — Next.js on Vercel, Vitest + Playwright E2E
 
-**Minecraft embodiment** — `minecraft-server/`, `minecraft-server-easy/`, `mindcraft/` host the agents' embodied bridge (Node-based Mineflayer integration); backend glue lives in `core/embodiment/` and `core/minecraft/` (with `core/minecraft/blueprint_generator.py` and `core/minecraft/cloud_providers.py` driving headless build planning, and BuildScript execution streaming to MC via RCON). Timestamped `minecraft-server-easy-*` directories are ephemeral shakeout/soak artifacts — don't edit them.
+**Minecraft embodiment** — `minecraft-server/`, `minecraft-server-easy/`, `mindcraft/` host the agents' embodied bridge (Node-based Mineflayer integration); backend glue lives in `core/embodiment/` and `core/minecraft/` (with `core/minecraft/blueprint_generator.py`, `core/minecraft/cloud_providers.py`, and a `BuildPlanCompiler` driving headless build planning, with compiled BuildScript execution streaming to MC via RCON). Timestamped `minecraft-server-easy-*` directories are ephemeral shakeout/soak artifacts — don't edit them.
 
 **Python 3.14+ is NOT supported** — native deps (pydantic-core, etc.) don't build against it.
 
@@ -85,5 +85,5 @@ Backend entrypoint: `uvicorn core.main:app --reload --port 8010`.
 - **`specs/` is read-only reference.** Don't edit specs to match code; update code or open a separate discussion.
 - **Makefile targets pin `.venv/bin/...`** so they work under `/bin/sh` without venv activation (e.g. `make test-backend`, `make render-verify`). Use them in automation rather than bare `pytest` / `playwright`.
 - **Agent model assignments** (conversation vs. building model per agent) are defined in `agents/<name>/` configs, `core/model_config.py`, and `specs/CHARACTER-SHEETS.md`. Don't reassign models ad-hoc — personality is tied to model choice.
-- **Minecraft embodiment is live:** `propose_build` BuildScripts stream to a running MC server via RCON. Don't add codepaths that silently skip the bridge — surface failures.
+- **Minecraft embodiment is live:** `propose_build` BuildScripts stream to a running MC server via RCON, compiled through `BuildPlanCompiler`. Don't add codepaths that silently skip the bridge — surface failures.
 - **Headless sim snapshots** must land under `snapshots/headless/` (pass `--output-dir snapshots/headless`) so the dashboard can serve artifacts. Avoid reasoning-variant Gemmas (e.g. `gemma-4-26b-a4b`) for local sims — they emit empty content; use `gemma-4-e4b`.

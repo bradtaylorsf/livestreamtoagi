@@ -20,9 +20,16 @@ from core.minecraft.director.tool_parity import (
 from core.tool_executor import build_agent_tools
 
 if TYPE_CHECKING:
+    from pathlib import Path
     from uuid import UUID
 
     from core.bootstrap import Services
+    from core.civilization.conflict import ConflictLedger
+    from core.civilization.diplomacy import DiplomacyLedger
+    from core.civilization.ownership import OwnershipLedger
+    from core.civilization.theft import TheftLedger
+    from core.civilization.trade import TradeLedger
+    from core.simulation.decision_logger import DecisionLogger
     from core.simulation.embodiment import EmbodimentExecutor
     from tools.base import BaseTool
 
@@ -43,11 +50,25 @@ class DirectorToolAdapter:
         tool_builder: ToolBuilder = build_agent_tools,
         simulation_mode: bool = False,
         embodiment_executor: EmbodimentExecutor | None = None,
+        sim_folder: Path | None = None,
+        ownership_ledger: OwnershipLedger | None = None,
+        trade_ledger: TradeLedger | None = None,
+        theft_ledger: TheftLedger | None = None,
+        diplomacy_ledger: DiplomacyLedger | None = None,
+        conflict_ledger: ConflictLedger | None = None,
+        decision_logger: DecisionLogger | None = None,
     ) -> None:
         self._services = services
         self._tool_builder = tool_builder
         self._simulation_mode = simulation_mode
         self._embodiment_executor = embodiment_executor
+        self._sim_folder = sim_folder
+        self._ownership_ledger = ownership_ledger
+        self._trade_ledger = trade_ledger
+        self._theft_ledger = theft_ledger
+        self._diplomacy_ledger = diplomacy_ledger
+        self._conflict_ledger = conflict_ledger
+        self._decision_logger = decision_logger
 
     def available_tools_for(self, agent_id: str) -> list[str]:
         """Return callable-now tools present in the agent's backend registry."""
@@ -176,6 +197,13 @@ class DirectorToolAdapter:
             self._services,
             self._simulation_mode,
             embodiment_executor=self._embodiment_executor,
+            sim_folder=self._sim_folder,
+            ownership_ledger=self._ownership_ledger,
+            trade_ledger=self._trade_ledger,
+            theft_ledger=self._theft_ledger,
+            diplomacy_ledger=self._diplomacy_ledger,
+            conflict_ledger=self._conflict_ledger,
+            decision_logger=self._decision_logger,
         )
 
     @staticmethod

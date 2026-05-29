@@ -51,6 +51,8 @@ ALL_CATEGORIES: tuple[str, ...] = (
     "simulation_narrative",
     "world_evolution",
     "build_quality",
+    "ownership",
+    "conflict",
 )
 
 LLM_JUDGE_CATEGORIES: tuple[str, ...] = (

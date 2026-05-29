@@ -16,6 +16,12 @@ if TYPE_CHECKING:
     from uuid import UUID
 
     from core.bootstrap import Services
+    from core.civilization.conflict import ConflictLedger
+    from core.civilization.diplomacy import DiplomacyLedger
+    from core.civilization.ownership import OwnershipLedger
+    from core.civilization.theft import TheftLedger
+    from core.civilization.trade import TradeLedger
+    from core.simulation.decision_logger import DecisionLogger
     from core.simulation.embodiment import EmbodimentExecutor
     from tools.base import BaseTool
 
@@ -32,6 +38,12 @@ def build_agent_tools(
     *,
     embodiment_executor: EmbodimentExecutor | None = None,
     sim_folder: Any | None = None,
+    ownership_ledger: OwnershipLedger | None = None,
+    trade_ledger: TradeLedger | None = None,
+    theft_ledger: TheftLedger | None = None,
+    diplomacy_ledger: DiplomacyLedger | None = None,
+    conflict_ledger: ConflictLedger | None = None,
+    decision_logger: DecisionLogger | None = None,
 ) -> dict[str, BaseTool]:
     """Build a tool registry for a specific agent, returning {name: tool_instance}.
 
@@ -66,6 +78,13 @@ def build_agent_tools(
         embodiment_executor=embodiment_executor,
         refinement_loop=getattr(services, "refinement_loop", None),
         sim_folder=sim_folder,
+        ownership_ledger=ownership_ledger,
+        trade_ledger=trade_ledger,
+        theft_ledger=theft_ledger,
+        diplomacy_ledger=diplomacy_ledger,
+        conflict_ledger=conflict_ledger,
+        goal_manager=services.goal_manager,
+        decision_logger=decision_logger,
     )
     for tool in core_tools:
         registry.register(tool)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING
 
 from .alpha_dispatch import DispatchAlphaTool
@@ -10,6 +11,30 @@ from .audience_tools import CreatePollTool, GetPollResultsTool, SendChatMessageT
 from .base import BaseTool
 from .build_tools import ProposeBuildTool, ProposeNewBuildingTool
 from .character_tools import ProposeCharacterTool, VoteCharacterTool
+from .civilization import (
+    AcceptJudgementTool,
+    AcceptTradeTool,
+    BreakTreatyTool,
+    ClaimOwnershipTool,
+    DeclareWarTool,
+    DefectFactionTool,
+    GetOwnershipTool,
+    ListActiveTreatiesTool,
+    ListMyClaimsTool,
+    ListPendingTradesTool,
+    OpenDisputeTool,
+    ProposeTradeTool,
+    ProposeTreatyTool,
+    RejectTradeTool,
+    ReleaseOwnershipTool,
+    ReportTheftTool,
+    RequestJudgementTool,
+    SecondWarTool,
+    SignTreatyTool,
+    StealTool,
+    SubmitEvidenceTool,
+    SurrenderTool,
+)
 from .code_execution import ExecuteCodeTool
 from .economy_tools import TransferBudgetTool, ViewAccountTool
 from .memory_tools import RecallMemoryTool, RetrieveTranscriptTool, UpdateCoreMemoryTool
@@ -38,9 +63,15 @@ if TYPE_CHECKING:
 
     import docker
     from core.agent_economy import AgentEconomyManager
+    from core.agent_goals import AgentGoalManager
     from core.agent_registry import AgentRegistry
     from core.characters.spawner import CharacterSpawner
     from core.characters.voting import VotingManager
+    from core.civilization.conflict import ConflictLedger
+    from core.civilization.diplomacy import DiplomacyLedger
+    from core.civilization.ownership import OwnershipLedger
+    from core.civilization.theft import TheftLedger
+    from core.civilization.trade import TradeLedger
     from core.event_bus import EventBus
     from core.llm_client import LLMClient
     from core.management import Management
@@ -54,15 +85,38 @@ if TYPE_CHECKING:
     from core.repos.memory_repo import MemoryRepo
     from core.repos.world_repo import WorldRepo
     from core.shared_state import SharedWorkingState
+    from core.simulation.decision_logger import DecisionLogger
     from core.simulation.embodiment import EmbodimentExecutor
     from core.social.alliances import AllianceManager
 
 __all__ = [
+    "AcceptJudgementTool",
+    "AcceptTradeTool",
     "BaseTool",
+    "BreakTreatyTool",
     "CheckEmailResponsesTool",
     "CheckPostPerformanceTool",
+    "ClaimOwnershipTool",
     "CreatePollTool",
+    "DeclareWarTool",
+    "DefectFactionTool",
+    "GetOwnershipTool",
+    "ListActiveTreatiesTool",
+    "ListMyClaimsTool",
+    "ListPendingTradesTool",
+    "OpenDisputeTool",
     "ProposeAllianceTool",
+    "ProposeTradeTool",
+    "ProposeTreatyTool",
+    "RejectTradeTool",
+    "ReleaseOwnershipTool",
+    "ReportTheftTool",
+    "RequestJudgementTool",
+    "SecondWarTool",
+    "SignTreatyTool",
+    "StealTool",
+    "SubmitEvidenceTool",
+    "SurrenderTool",
     "ProposeCharacterTool",
     "VoteCharacterTool",
     "DispatchAlphaTool",
@@ -116,6 +170,13 @@ class ToolRegistry:
         return list(self._tools.keys())
 
 
+def _env_enabled(value: str | None, *, default: bool = False) -> bool:
+    """Parse a truthy/falsy env flag, falling back to ``default`` when unset."""
+    if value is None or value == "":
+        return default
+    return value.strip().lower() not in {"0", "false", "no", "off", "disabled"}
+
+
 def get_core_tools(
     event_bus: EventBus,
     redis_client: RedisClient,
@@ -137,6 +198,13 @@ def get_core_tools(
     embodiment_executor: EmbodimentExecutor | None = None,
     refinement_loop: RefinementLoop | None = None,
     sim_folder: Path | None = None,
+    ownership_ledger: OwnershipLedger | None = None,
+    trade_ledger: TradeLedger | None = None,
+    theft_ledger: TheftLedger | None = None,
+    diplomacy_ledger: DiplomacyLedger | None = None,
+    conflict_ledger: ConflictLedger | None = None,
+    goal_manager: AgentGoalManager | None = None,
+    decision_logger: DecisionLogger | None = None,
 ) -> list[BaseTool]:
     """Create instances of all core tools available to every agent.
 
@@ -276,6 +344,204 @@ def get_core_tools(
             embodiment_executor=embodiment_executor,
             refinement_loop=refinement_loop,
             sim_folder=sim_folder,
+        )
+    )
+
+    # Civilization ownership tools (#891). The ledger is per-sim; when no
+    # ledger is supplied the tools still register but report
+    # ownership_ledger_unavailable so callers see a clear error.
+    tools.append(
+        ClaimOwnershipTool(
+            agent_id=agent_id,
+            ledger=ownership_ledger,
+            decision_logger=decision_logger,
+        )
+    )
+    tools.append(
+        ReleaseOwnershipTool(
+            agent_id=agent_id,
+            ledger=ownership_ledger,
+            decision_logger=decision_logger,
+        )
+    )
+    tools.append(
+        GetOwnershipTool(
+            agent_id=agent_id,
+            ledger=ownership_ledger,
+        )
+    )
+    tools.append(
+        ListMyClaimsTool(
+            agent_id=agent_id,
+            ledger=ownership_ledger,
+        )
+    )
+
+    # Civilization trade tools (#892). The trade ledger is per-sim; when no
+    # ledger is supplied the tools still register but report
+    # trade_ledger_unavailable. Accept/reject also take the ownership ledger
+    # so container target_refs inside a trade transfer claims atomically.
+    tools.append(
+        ProposeTradeTool(
+            agent_id=agent_id,
+            ledger=trade_ledger,
+            decision_logger=decision_logger,
+        )
+    )
+    tools.append(
+        AcceptTradeTool(
+            agent_id=agent_id,
+            ledger=trade_ledger,
+            ownership_ledger=ownership_ledger,
+            decision_logger=decision_logger,
+        )
+    )
+    tools.append(
+        RejectTradeTool(
+            agent_id=agent_id,
+            ledger=trade_ledger,
+            decision_logger=decision_logger,
+        )
+    )
+    tools.append(
+        ListPendingTradesTool(
+            agent_id=agent_id,
+            ledger=trade_ledger,
+        )
+    )
+
+    # Civilization theft tools (#893). The theft ledger shares the trade
+    # inventory model, so a successful steal moves materials from the
+    # victim's TradeLedger inventory to the thief's. Same per-sim pattern:
+    # when no ledger is supplied the tools register but report
+    # theft_ledger_unavailable. The diplomacy ledger + goal manager (#894)
+    # let detected theft auto-break non_aggression treaties and inject
+    # mutual_defense goals for allied agents.
+    # The tick_provider reads decision_logger.tick so the deterministic
+    # detection roll varies across steals — without it, every steal by the
+    # same thief hashes to the same outcome.
+    _theft_tick_provider = (lambda: decision_logger.tick) if decision_logger is not None else None
+    # victim_online feeds the theft detection roll: a present victim raises the
+    # detection threshold. A headless sim has no live presence model, so the
+    # value is operator-tunable via MC_SIM_THEFT_VICTIM_ONLINE. It defaults to
+    # False so wiring the provider does NOT change the current detection
+    # severity (this issue is wiring only). The provider stays None on a
+    # no-ledger run so StealTool's None-safe default is preserved.
+    _theft_victim_online = _env_enabled(os.environ.get("MC_SIM_THEFT_VICTIM_ONLINE"))
+    _theft_victim_online_provider = (
+        (lambda _victim_id: _theft_victim_online) if theft_ledger is not None else None
+    )
+    tools.append(
+        StealTool(
+            agent_id=agent_id,
+            theft_ledger=theft_ledger,
+            decision_logger=decision_logger,
+            diplomacy_ledger=diplomacy_ledger,
+            goal_manager=goal_manager,
+            tick_provider=_theft_tick_provider,
+            victim_online_provider=_theft_victim_online_provider,
+        )
+    )
+    tools.append(
+        ReportTheftTool(
+            agent_id=agent_id,
+            theft_ledger=theft_ledger,
+            decision_logger=decision_logger,
+            diplomacy_ledger=diplomacy_ledger,
+            goal_manager=goal_manager,
+        )
+    )
+
+    # Civilization diplomacy tools (#894). Backed by a DiplomacyLedger that
+    # tracks factions + treaties; when none is supplied the tools still
+    # register but report diplomacy_ledger_unavailable.
+    tools.append(
+        ProposeTreatyTool(
+            agent_id=agent_id,
+            ledger=diplomacy_ledger,
+            decision_logger=decision_logger,
+        )
+    )
+    tools.append(
+        SignTreatyTool(
+            agent_id=agent_id,
+            ledger=diplomacy_ledger,
+            decision_logger=decision_logger,
+        )
+    )
+    tools.append(
+        BreakTreatyTool(
+            agent_id=agent_id,
+            ledger=diplomacy_ledger,
+            decision_logger=decision_logger,
+        )
+    )
+    tools.append(
+        DefectFactionTool(
+            agent_id=agent_id,
+            ledger=diplomacy_ledger,
+            decision_logger=decision_logger,
+        )
+    )
+    tools.append(
+        ListActiveTreatiesTool(
+            agent_id=agent_id,
+            ledger=diplomacy_ledger,
+        )
+    )
+
+    # Civilization conflict tools (#895). Backed by a ConflictLedger that
+    # references the prior civilization ledgers (ownership/trade/theft/
+    # diplomacy) so consequences flow to the correct subsystem when
+    # disputes resolve. When no ledger is supplied the tools register but
+    # report conflict_ledger_unavailable.
+    tools.append(
+        OpenDisputeTool(
+            agent_id=agent_id,
+            ledger=conflict_ledger,
+            decision_logger=decision_logger,
+        )
+    )
+    tools.append(
+        SubmitEvidenceTool(
+            agent_id=agent_id,
+            ledger=conflict_ledger,
+            decision_logger=decision_logger,
+        )
+    )
+    tools.append(
+        RequestJudgementTool(
+            agent_id=agent_id,
+            ledger=conflict_ledger,
+            decision_logger=decision_logger,
+        )
+    )
+    tools.append(
+        AcceptJudgementTool(
+            agent_id=agent_id,
+            ledger=conflict_ledger,
+            decision_logger=decision_logger,
+        )
+    )
+    tools.append(
+        DeclareWarTool(
+            agent_id=agent_id,
+            ledger=conflict_ledger,
+            decision_logger=decision_logger,
+        )
+    )
+    tools.append(
+        SecondWarTool(
+            agent_id=agent_id,
+            ledger=conflict_ledger,
+            decision_logger=decision_logger,
+        )
+    )
+    tools.append(
+        SurrenderTool(
+            agent_id=agent_id,
+            ledger=conflict_ledger,
+            decision_logger=decision_logger,
         )
     )
 

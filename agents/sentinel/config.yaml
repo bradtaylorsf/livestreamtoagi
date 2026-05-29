@@ -14,10 +14,22 @@ closing_weight: 0.25
 role_priority_bonus: 0.15
 
 tools:
+  - manage_task
   - execute_code
   - dispatch_alpha
   - send_chat_message
   - get_revenue_status
+  - propose_trade
+  - accept_trade
+  - reject_trade
+  - list_pending_trades
+  - open_dispute
+  - submit_evidence
+  - request_judgement
+  - accept_judgement
+  - declare_war
+  - second_war
+  - surrender
 
 topic_relevance:
   code: 0.3

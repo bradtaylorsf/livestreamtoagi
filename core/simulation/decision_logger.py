@@ -26,7 +26,11 @@ from core.simulation.decision_log_schema import (
     AllianceDeltaRow,
     BlackboardMutationPayload,
     BlackboardMutationRow,
+    ConflictEventPayload,
+    ConflictEventRow,
     DecisionLogRow,
+    DiplomacyEventPayload,
+    DiplomacyEventRow,
     DreamPayload,
     DreamRow,
     MotivationLink,
@@ -34,10 +38,16 @@ from core.simulation.decision_log_schema import (
     NeedsStateRow,
     NewGoalPayload,
     NewGoalRow,
+    OwnershipDeltaPayload,
+    OwnershipDeltaRow,
     RelationshipDeltaPayload,
     RelationshipDeltaRow,
+    TheftEventPayload,
+    TheftEventRow,
     ToolIntentPayload,
     ToolIntentRow,
+    TradeEventPayload,
+    TradeEventRow,
     UtterancePayload,
     UtteranceRow,
     WorldEventPayload,
@@ -284,6 +294,189 @@ class DecisionLogger:
                     trigger=trigger,
                     severity=severity,
                     details=details or {},
+                ),
+            )
+        )
+
+    def log_ownership_delta(
+        self,
+        *,
+        claim_id: str,
+        owner_agent_id: str,
+        target_type: str,
+        target_ref: dict[str, Any],
+        action: str,
+        motivation: str | None = None,
+        actor_id: str | None = None,
+        sim_time: float = 0.0,
+    ) -> None:
+        self._write(
+            OwnershipDeltaRow(
+                tick=self.advance_tick(),
+                wall_time=datetime.now(UTC),
+                sim_time=sim_time,
+                actor_id=actor_id or owner_agent_id,
+                payload=OwnershipDeltaPayload(
+                    claim_id=claim_id,
+                    owner_agent_id=owner_agent_id,
+                    target_type=target_type,  # type: ignore[arg-type]
+                    target_ref=target_ref or {},
+                    action=action,  # type: ignore[arg-type]
+                    motivation=motivation,
+                ),
+            )
+        )
+
+    def log_trade_event(
+        self,
+        *,
+        offer_id: str,
+        proposer_id: str,
+        recipient_id: str,
+        give: dict[str, int] | None = None,
+        want: dict[str, int] | None = None,
+        action: str,
+        motivation: str | None = None,
+        reject_reason: str | None = None,
+        price_observation: dict[str, Any] | None = None,
+        actor_id: str | None = None,
+        sim_time: float = 0.0,
+    ) -> None:
+        self._write(
+            TradeEventRow(
+                tick=self.advance_tick(),
+                wall_time=datetime.now(UTC),
+                sim_time=sim_time,
+                actor_id=actor_id or proposer_id,
+                payload=TradeEventPayload(
+                    offer_id=offer_id,
+                    proposer_id=proposer_id,
+                    recipient_id=recipient_id,
+                    give=dict(give or {}),
+                    want=dict(want or {}),
+                    motivation=motivation,
+                    action=action,  # type: ignore[arg-type]
+                    reject_reason=reject_reason,
+                    price_observation=price_observation,
+                ),
+            )
+        )
+
+    def log_theft_event(
+        self,
+        *,
+        attempt_id: str,
+        thief_id: str,
+        victim_id: str,
+        container_ref: dict[str, Any],
+        items: dict[str, int] | None = None,
+        detected: bool,
+        witnesses: list[str] | None = None,
+        motivation: str | None = None,
+        actor_id: str | None = None,
+        sim_time: float = 0.0,
+    ) -> None:
+        self._write(
+            TheftEventRow(
+                tick=self.advance_tick(),
+                wall_time=datetime.now(UTC),
+                sim_time=sim_time,
+                actor_id=actor_id or thief_id,
+                payload=TheftEventPayload(
+                    attempt_id=attempt_id,
+                    thief_id=thief_id,
+                    victim_id=victim_id,
+                    container_ref=dict(container_ref or {}),
+                    items=dict(items or {}),
+                    detected=detected,
+                    witnesses=list(witnesses or []),
+                    motivation=motivation,
+                ),
+            )
+        )
+
+    def log_diplomacy_event(
+        self,
+        *,
+        treaty_id: str | None,
+        parties: list[str],
+        action: str,
+        terms: dict[str, Any] | None = None,
+        breaker_id: str | None = None,
+        defector_id: str | None = None,
+        from_faction: str | None = None,
+        to_faction: str | None = None,
+        motivation: str | None = None,
+        reason: str | None = None,
+        actor_id: str | None = None,
+        sim_time: float = 0.0,
+    ) -> None:
+        self._write(
+            DiplomacyEventRow(
+                tick=self.advance_tick(),
+                wall_time=datetime.now(UTC),
+                sim_time=sim_time,
+                actor_id=actor_id,
+                payload=DiplomacyEventPayload(
+                    treaty_id=treaty_id,
+                    parties=list(parties or []),
+                    action=action,  # type: ignore[arg-type]
+                    terms=dict(terms or {}),
+                    breaker_id=breaker_id,
+                    defector_id=defector_id,
+                    from_faction=from_faction,
+                    to_faction=to_faction,
+                    motivation=motivation,
+                    reason=reason,
+                ),
+            )
+        )
+
+    def log_conflict_event(
+        self,
+        *,
+        action: str,
+        dispute_id: str | None = None,
+        war_id: str | None = None,
+        initiator_id: str | None = None,
+        respondent_id: str | None = None,
+        dispute_type: str | None = None,
+        outcome: dict[str, Any] | None = None,
+        judgement: str | None = None,
+        terms: dict[str, Any] | None = None,
+        motivation: str | None = None,
+        reason: str | None = None,
+        casus_belli: str | None = None,
+        target_faction_id: str | None = None,
+        initiator_faction_id: str | None = None,
+        seconders: list[str] | None = None,
+        required_quorum: int | None = None,
+        actor_id: str | None = None,
+        sim_time: float = 0.0,
+    ) -> None:
+        self._write(
+            ConflictEventRow(
+                tick=self.advance_tick(),
+                wall_time=datetime.now(UTC),
+                sim_time=sim_time,
+                actor_id=actor_id,
+                payload=ConflictEventPayload(
+                    action=action,  # type: ignore[arg-type]
+                    dispute_id=dispute_id,
+                    war_id=war_id,
+                    initiator_id=initiator_id,
+                    respondent_id=respondent_id,
+                    dispute_type=dispute_type,  # type: ignore[arg-type]
+                    outcome=outcome,
+                    judgement=judgement,
+                    terms=terms,
+                    motivation=motivation,
+                    reason=reason,
+                    casus_belli=casus_belli,
+                    target_faction_id=target_faction_id,
+                    initiator_faction_id=initiator_faction_id,
+                    seconders=list(seconders or []),
+                    required_quorum=required_quorum,
                 ),
             )
         )
