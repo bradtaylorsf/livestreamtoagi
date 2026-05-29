@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from core.bridge.contract import BridgeRequest, CostContext
+from core.bridge.handlers.shared_state import handle_shared_state_write
 from core.shared_state import (
     Decision,
     SettlementObjective,
@@ -279,6 +282,181 @@ class TestSettlementObjectives:
         assert objectives[0].verified_blocks == 12
         assert objectives[0].completion_ratio == 1.0
         assert "action_id" not in objectives[0].evidence
+
+
+class TestAdvanceSettlementObjective:
+    """Positive-latch behavior of advance_settlement_objective (#904)."""
+
+    @staticmethod
+    async def _seed_in_progress(state: SharedWorkingState) -> None:
+        await state.set_settlement_objectives(
+            [
+                SettlementObjective(
+                    objective_id="phase-1-starter-cabin",
+                    phase_index=0,
+                    description="starter cabin",
+                    status="in_progress",
+                    owner_agent_id="fork",
+                    verified_blocks=13,
+                    completion_ratio=0.4,
+                )
+            ]
+        )
+
+    @pytest.mark.asyncio
+    async def test_high_ratio_advance_latches_completed(self) -> None:
+        redis = _make_mock_redis()
+        state = SharedWorkingState(redis)
+        await self._seed_in_progress(state)
+
+        # A blocked advance that nonetheless cleared the bar must latch completed.
+        updated = await state.advance_settlement_objective(
+            "phase-1-starter-cabin",
+            status="blocked",
+            verified_blocks=31,
+            completion_ratio=0.969,
+            evidence={"action_id": "high-ratio"},
+        )
+
+        assert updated is not None
+        assert updated.status == "completed"
+        assert updated.completed_at is not None
+
+        # A later lower-ratio advance must not revert it (existing demotion guard).
+        again = await state.advance_settlement_objective(
+            "phase-1-starter-cabin",
+            status="blocked",
+            verified_blocks=13,
+            completion_ratio=0.5,
+        )
+
+        assert again is not None
+        assert again.status == "completed"
+        objectives = await state.get_settlement_objectives()
+        assert objectives[0].status == "completed"
+        assert objectives[0].completion_ratio == 0.969
+
+    @pytest.mark.asyncio
+    async def test_latch_bar_honors_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Raise the bar above the incoming ratio: the advance must NOT latch.
+        monkeypatch.setenv("MC_SIM_SETTLEMENT_COMPLETE_RATIO", "0.99")
+        redis = _make_mock_redis()
+        state = SharedWorkingState(redis)
+        await self._seed_in_progress(state)
+
+        updated = await state.advance_settlement_objective(
+            "phase-1-starter-cabin",
+            status="blocked",
+            completion_ratio=0.969,
+        )
+
+        assert updated is not None
+        assert updated.status == "blocked"
+        assert updated.completed_at is None
+
+    @pytest.mark.asyncio
+    async def test_abandoned_status_round_trips(self) -> None:
+        # The 'abandoned' status (used by JS reassignment writes) must survive
+        # normalization instead of being silently demoted to 'pending'.
+        redis = _make_mock_redis()
+        state = SharedWorkingState(redis)
+        await self._seed_in_progress(state)
+
+        updated = await state.advance_settlement_objective(
+            "phase-1-starter-cabin",
+            status="abandoned",
+            completion_ratio=0.1,
+        )
+
+        assert updated is not None
+        assert updated.status == "abandoned"
+
+
+class TestSettlementObjectiveAdvanceBridge:
+    """Bridge handler plumbing for settlement_objective_advance (#904)."""
+
+    @staticmethod
+    def _services(state: SharedWorkingState) -> SimpleNamespace:
+        return SimpleNamespace(redis=None, shared_working_state=state)
+
+    @staticmethod
+    def _advance_env(objective: dict[str, object]) -> BridgeRequest:
+        return BridgeRequest(
+            version="1.7",
+            request_id="req-advance-test",
+            agent_id="fork",
+            run_id="run-test",
+            simulation_id="sim-advance-test",
+            service="shared_state",
+            method="write",
+            payload={
+                "operation": "settlement_objective_advance",
+                "settlement_objective": objective,
+            },
+            deadline_ms=1000,
+            cost_context=CostContext(
+                agent_tier="conversation",
+                budget_bucket="shared-state",
+                estimated_cost_usd=0.0,
+            ),
+        )
+
+    @pytest.mark.asyncio
+    async def test_no_match_advance_error_includes_objective_id(self) -> None:
+        redis = _make_mock_redis()
+        state = SharedWorkingState(redis)
+        # No objectives seeded -> the advance cannot match.
+        env = self._advance_env(
+            {
+                "objective_id": "phase-9-ghost",
+                "phase_index": 8,
+                "description": "ghost objective",
+                "status": "blocked",
+            }
+        )
+
+        with pytest.raises(ValueError) as excinfo:
+            await handle_shared_state_write(env, self._services(state))
+
+        message = str(excinfo.value)
+        assert "phase-9-ghost" in message
+        assert "blocked" in message
+
+    @pytest.mark.asyncio
+    async def test_build_exception_blocked_advance_records_on_ledger(self) -> None:
+        # Mirrors the JS throw-path emit: a build exception sends a blocked
+        # advance for the back-filled objective so it does not stay in_progress.
+        redis = _make_mock_redis()
+        state = SharedWorkingState(redis)
+        await state.set_settlement_objectives(
+            [
+                SettlementObjective(
+                    objective_id="phase-1-starter-cabin",
+                    phase_index=0,
+                    description="starter cabin",
+                    status="in_progress",
+                    owner_agent_id="fork",
+                )
+            ]
+        )
+        env = self._advance_env(
+            {
+                "objective_id": "phase-1-starter-cabin",
+                "phase_index": 0,
+                "description": "starter cabin",
+                "owner_agent_id": "fork",
+                "status": "blocked",
+                "reassign_reason": "build_exception",
+                "evidence": {"error": "RconBuildExecutor crashed"},
+            }
+        )
+
+        result = await handle_shared_state_write(env, self._services(state))
+
+        assert result["accepted"] is True
+        objectives = await state.get_settlement_objectives()
+        assert objectives[0].status == "blocked"
+        assert objectives[0].evidence.get("error") == "RconBuildExecutor crashed"
 
 
 class TestGetSummaryForContext:

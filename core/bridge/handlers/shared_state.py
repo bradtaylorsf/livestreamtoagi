@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import uuid
 from dataclasses import asdict
@@ -27,6 +28,8 @@ from core.shared_state import (
     SharedWorkingState,
     VerifiedAction,
 )
+
+logger = logging.getLogger(__name__)
 
 RESCUE_STRATEGIES_BY_MODE = {
     "easy": "teleport_op",
@@ -219,7 +222,16 @@ async def handle_shared_state_write(env: BridgeRequest, services: Any) -> dict[s
             evidence=data.get("evidence") or None,
         )
         if updated is None:
-            raise ValueError("settlement_objective_advance did not match an objective")
+            logger.warning(
+                "settlement_objective_advance did not match an objective "
+                "(objective_id=%r status=%r)",
+                data.get("objective_id"),
+                data.get("status"),
+            )
+            raise ValueError(
+                "settlement_objective_advance did not match an objective "
+                f"(objective_id={data.get('objective_id')!r} status={data.get('status')!r})"
+            )
 
     return {
         "accepted": True,

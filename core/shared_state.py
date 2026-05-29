@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -36,6 +37,14 @@ _MAX_RECENT_DANGERS = 25
 _MAX_RECENT_VERIFIED_ACTIONS = 25
 _MAX_NEXT_STEPS = 25
 _MAX_SETTLEMENT_OBJECTIVES = 12
+
+# Completion-ratio bar at/above which a settlement objective advance latches to
+# "completed" (see advance_settlement_objective). This is the single source of
+# truth for the completion bar; the JS success check in
+# scripts/minecraft/fork-src/agent/commands/plan_and_build_action.js
+# (settlementCompleteRatio()) reads the same MC_SIM_SETTLEMENT_COMPLETE_RATIO env
+# var with the same default, so the two bars cannot drift.
+_DEFAULT_SETTLEMENT_COMPLETE_RATIO = 0.8
 
 DANGER_KINDS = frozenset(
     {
@@ -534,6 +543,14 @@ class SharedWorkingState:
                 objective.verified_blocks = max(0, int(verified_blocks))
             if completion_ratio is not None:
                 objective.completion_ratio = max(0.0, min(float(completion_ratio), 1.0))
+            # #904 positive latch: once an advance carries a completion ratio at
+            # or above the bar, latch the objective to "completed" regardless of
+            # the requested status. A late or build-exception "blocked" advance
+            # that still cleared the bar must not leave the objective stuck
+            # in_progress. The demotion guard above already prevents a later
+            # lower-ratio advance from reverting an already-completed objective.
+            if objective.completion_ratio >= _settlement_complete_ratio():
+                objective.status = "completed"
             if evidence:
                 objective.evidence.update(evidence)
             if objective.status == "completed":
@@ -740,6 +757,21 @@ def _normalize_danger_kind(kind: str) -> str:
     return text if text in DANGER_KINDS else "trapped"
 
 
+def _settlement_complete_ratio() -> float:
+    """Completion-ratio bar at/above which an advance latches to "completed".
+
+    Read at call time from ``MC_SIM_SETTLEMENT_COMPLETE_RATIO`` so the bar is
+    runtime-configurable and stays the single source of truth shared with the JS
+    success check (see ``_DEFAULT_SETTLEMENT_COMPLETE_RATIO``). Falls back to the
+    default for unset / non-numeric / non-positive values.
+    """
+    try:
+        raw = float(os.environ.get("MC_SIM_SETTLEMENT_COMPLETE_RATIO", ""))
+    except (TypeError, ValueError):
+        return _DEFAULT_SETTLEMENT_COMPLETE_RATIO
+    return raw if raw > 0 else _DEFAULT_SETTLEMENT_COMPLETE_RATIO
+
+
 def _normalize_objective_status(status: str) -> str:
     text = str(status or "").strip().lower().replace("-", "_").replace(" ", "_")
     valid = {
@@ -751,6 +783,7 @@ def _normalize_objective_status(status: str) -> str:
         "stale",
         "completed",
         "failed",
+        "abandoned",
     }
     return text if text in valid else "pending"
 

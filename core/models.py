@@ -1002,6 +1002,7 @@ class EmbodiedSettlementObjective(BaseModel):
         "stale",
         "completed",
         "failed",
+        "abandoned",
     ] = "pending"
     plan_id: str | None = Field(default=None, min_length=1)
     intended_blocks: int = Field(default=0, ge=0)
