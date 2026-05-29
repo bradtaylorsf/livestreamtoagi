@@ -67,6 +67,7 @@ ACTIONS_PLAN_AND_BUILD_PATCH_MARKER="LTAG E9-1 plan-and-build action"
 ACTIONS_RESCUE_PATCH_MARKER="LTAG E12-13 rescue action"
 ACTIONS_EXECUTE_CODE_PATCH_MARKER="LTAG E6-5 execute-code action"
 ACTIONS_OBSERVE_PATCH_MARKER="LTAG E6-6 observe action"
+ACTIONS_MANAGE_TASK_PATCH_MARKER="LTAG E21-7g manage-task action"
 ACTIONS_INTERRUPTION_GUARD_PATCH_MARKER="LTAG E8-14 action interruption guard"
 ACTIONS_PARSE_GUARD_PATCH_MARKER="LTAG E8-16 command parse guard"
 PLAN_AND_BUILD_ARG_FOLD_PATCH_MARKER="LTAG E12 open settlement planAndBuild arg fold"
@@ -96,6 +97,7 @@ PLAN_AND_BUILD_ACTION_REL="src/agent/commands/plan_and_build_action.js"
 RESCUE_ACTION_REL="src/agent/commands/rescue_action.js"
 EXECUTE_CODE_ACTION_REL="src/agent/commands/execute_code_action.js"
 OBSERVE_ACTION_REL="src/agent/commands/observe_action.js"
+MANAGE_TASK_ACTION_REL="src/agent/commands/manage_task_action.js"
 PLACE_HERE_GUARD_REL="src/agent/commands/place_here_guard.js"
 MOVEMENT_SKILL_REL="src/agent/skills/movement.js"
 BUILDING_SKILL_REL="src/agent/skills/building.js"
@@ -143,6 +145,7 @@ PLAN_AND_BUILD_ACTION_SRC="$FORK_SRC_DIR/agent/commands/plan_and_build_action.js
 RESCUE_ACTION_SRC="$FORK_SRC_DIR/agent/commands/rescue_action.js"
 EXECUTE_CODE_ACTION_SRC="$FORK_SRC_DIR/agent/commands/execute_code_action.js"
 OBSERVE_ACTION_SRC="$FORK_SRC_DIR/agent/commands/observe_action.js"
+MANAGE_TASK_ACTION_SRC="$FORK_SRC_DIR/agent/commands/manage_task_action.js"
 PLACE_HERE_GUARD_SRC="$FORK_SRC_DIR/agent/commands/place_here_guard.js"
 MOVEMENT_SKILL_SRC="$FORK_SRC_DIR/agent/skills/movement.js"
 BUILDING_SKILL_SRC="$FORK_SRC_DIR/agent/skills/building.js"
@@ -505,6 +508,7 @@ stage_file "$PLAN_AND_BUILD_ACTION_SRC" "$PLAN_AND_BUILD_ACTION_REL"
 stage_file "$RESCUE_ACTION_SRC" "$RESCUE_ACTION_REL"
 stage_file "$EXECUTE_CODE_ACTION_SRC" "$EXECUTE_CODE_ACTION_REL"
 stage_file "$OBSERVE_ACTION_SRC" "$OBSERVE_ACTION_REL"
+stage_file "$MANAGE_TASK_ACTION_SRC" "$MANAGE_TASK_ACTION_REL"
 stage_file "$PLACE_HERE_GUARD_SRC" "$PLACE_HERE_GUARD_REL"
 stage_file "$MOVEMENT_SKILL_SRC" "$MOVEMENT_SKILL_REL"
 stage_file "$BUILDING_SKILL_SRC" "$BUILDING_SKILL_REL"
@@ -917,6 +921,7 @@ if grep -q "$ACTIONS_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_RESCUE_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_EXECUTE_CODE_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_OBSERVE_PATCH_MARKER" "$ACTIONS_PATH" || \
+   grep -q "$ACTIONS_MANAGE_TASK_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_INTERRUPTION_GUARD_PATCH_MARKER" "$ACTIONS_PATH" || \
    grep -q "$ACTIONS_PARSE_GUARD_PATCH_MARKER" "$ACTIONS_PATH"; then
     info "Found a previous bridge-action patch in $ACTIONS_REL; restoring pinned source first."
@@ -938,6 +943,7 @@ if ! ACTIONS_PATH="$ACTIONS_PATH" \
     ACTIONS_RESCUE_PATCH_MARKER="$ACTIONS_RESCUE_PATCH_MARKER" \
     ACTIONS_EXECUTE_CODE_PATCH_MARKER="$ACTIONS_EXECUTE_CODE_PATCH_MARKER" \
     ACTIONS_OBSERVE_PATCH_MARKER="$ACTIONS_OBSERVE_PATCH_MARKER" \
+    ACTIONS_MANAGE_TASK_PATCH_MARKER="$ACTIONS_MANAGE_TASK_PATCH_MARKER" \
     ACTIONS_INTERRUPTION_GUARD_PATCH_MARKER="$ACTIONS_INTERRUPTION_GUARD_PATCH_MARKER" \
     ACTIONS_PARSE_GUARD_PATCH_MARKER="$ACTIONS_PARSE_GUARD_PATCH_MARKER" \
     node --input-type=module <<'NODE'
@@ -988,6 +994,7 @@ const actions = [
     ['rescueAction', './rescue_action.js', process.env.ACTIONS_RESCUE_PATCH_MARKER],
     ['executeCodeAction', './execute_code_action.js', process.env.ACTIONS_EXECUTE_CODE_PATCH_MARKER],
     ['observeAction', './observe_action.js', process.env.ACTIONS_OBSERVE_PATCH_MARKER],
+    ['manageTaskAction', './manage_task_action.js', process.env.ACTIONS_MANAGE_TASK_PATCH_MARKER],
 ];
 const missing = actions.filter(([, , marker]) => !source.includes(marker));
 if (missing.length > 0) {

@@ -25,6 +25,7 @@ from core.shared_state import (
     NextStep,
     ResourceEntry,
     SettlementObjective,
+    SharedTask,
     SharedWorkingState,
     VerifiedAction,
 )
@@ -122,6 +123,7 @@ async def handle_shared_state_write(env: BridgeRequest, services: Any) -> dict[s
     payload = SharedStateWriteRequest.model_validate(env.payload)
     state = _state_for_request(env, services)
     writer = env.agent_id
+    task_result: dict[str, Any] = {}
 
     if payload.operation == "goal_set":
         if payload.goal is None:
@@ -232,10 +234,44 @@ async def handle_shared_state_write(env: BridgeRequest, services: Any) -> dict[s
                 "settlement_objective_advance did not match an objective "
                 f"(objective_id={data.get('objective_id')!r} status={data.get('status')!r})"
             )
+    elif payload.operation == "task_create":
+        # E21-7g: a bot proposes work to the shared board. Created OPEN/unclaimed
+        # (owner=None) so any agent — including the proposer — can claim it,
+        # which keeps the emergent propose->claim loop genuinely multi-agent.
+        title = (payload.task_title or "").strip()
+        if not title:
+            raise ValueError("task_create requires task_title")
+        task_id = f"task-{uuid.uuid4().hex[:8]}"
+        await state.add_task(SharedTask(id=task_id, title=title, owner=None, status="pending"))
+        task_result = {"task_id": task_id, "task_status": "created"}
+    elif payload.operation == "task_claim":
+        # E21-7g: atomic first-claim-wins (the loser learns the current owner).
+        if not payload.task_id:
+            raise ValueError("task_claim requires task_id")
+        claimed = await state.claim_task(payload.task_id, writer)
+        owner = claimed.get("owner")
+        task_result = {
+            "task_id": payload.task_id,
+            "task_status": str(claimed.get("status")),
+            "task_owner": str(owner) if owner else None,
+        }
+    elif payload.operation == "task_complete":
+        # E21-7g: mark a claimed task done (evidence is announced in chat).
+        if not payload.task_id:
+            raise ValueError("task_complete requires task_id")
+        found = await state.update_task_status(payload.task_id, "done")
+        task_result = {
+            "task_id": payload.task_id,
+            "task_status": "done" if found else "not_found",
+        }
+    elif payload.operation == "task_list":
+        # E21-7g: the board is rendered in the formatted summary returned below.
+        task_result = {"task_status": "ok"}
 
     return {
         "accepted": True,
         "formatted": await state.get_summary_for_context(),
+        **task_result,
     }
 
 

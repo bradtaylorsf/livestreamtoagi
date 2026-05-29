@@ -2591,7 +2591,11 @@
             "next_step_add",
             "settlement_objectives_set",
             "settlement_objective_assign",
-            "settlement_objective_advance"
+            "settlement_objective_advance",
+            "task_create",
+            "task_claim",
+            "task_complete",
+            "task_list"
           ],
           "title": "Operation",
           "type": "string"
@@ -2625,6 +2629,45 @@
           "title": "Settlement Objectives",
           "type": "array"
         },
+        "task_evidence": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional completion evidence for task_complete.",
+          "title": "Task Evidence"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Target id for task_claim/task_complete.",
+          "title": "Task Id"
+        },
+        "task_title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Title for task_create.",
+          "title": "Task Title"
+        },
         "verified_action": {
           "anyOf": [
             {
@@ -2655,6 +2698,45 @@
           "description": "Updated prompt-friendly blackboard summary.",
           "title": "Formatted",
           "type": "string"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Created/affected task id.",
+          "title": "Task Id"
+        },
+        "task_owner": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Owning agent after a claim.",
+          "title": "Task Owner"
+        },
+        "task_status": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Result of a task op: ok|already_claimed|not_found|done|created.",
+          "title": "Task Status"
         }
       },
       "required": [

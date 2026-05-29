@@ -16,14 +16,26 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 RUN_LOCAL_SIM = REPO_ROOT / "scripts" / "minecraft" / "run-local-sim.sh"
 
 # Phrases that drove the cabin-copycat loop and must never appear in emergent.
+# Note: the copycat was driven by the CONCRETE example ("small shared cabin") plus
+# the settlement scaffolding, not by planAndBuild itself. E21-7g re-allows a
+# GENERIC planAndBuild placeholder in the seed so agents build real coherent
+# structures (vs scattered !placeHere markers) while still inventing what to
+# build — the concrete-cabin string stays forbidden to prevent copycat.
 FORBIDDEN_PHRASES = (
     "small shared cabin",
     "Complete these settlement objectives in order",
     "Rotate the build owner",
-    "!planAndBuild(",
 )
-# Task-board framing the emergent seed must teach.
-REQUIRED_PHRASES = ("observe", "propose", "claim", "execute", "report", "task board")
+# Task-board framing the emergent seed must teach (E21-7g manage_task loop).
+REQUIRED_PHRASES = (
+    "observe",
+    "propose",
+    "claim",
+    "execute",
+    "report",
+    "task board",
+    "!manageTask",
+)
 
 # Strip any inherited Minecraft env so a polluted parent shell cannot mask the
 # script's own resolution (mirrors test_minecraft_director_acceptance_soak.py).

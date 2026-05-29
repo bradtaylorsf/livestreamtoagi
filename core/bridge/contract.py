@@ -357,6 +357,12 @@ class SharedStateWriteRequest(BaseModel):
         "settlement_objectives_set",
         "settlement_objective_assign",
         "settlement_objective_advance",
+        # E21-7g embodied task board: let Mindcraft bots drive the shared task
+        # list (the emergent observe->propose->claim->execute->report loop).
+        "task_create",
+        "task_claim",
+        "task_complete",
+        "task_list",
     ]
     goal: EmbodiedGroupGoal | None = None
     resource: EmbodiedResourceEntry | None = None
@@ -368,12 +374,24 @@ class SharedStateWriteRequest(BaseModel):
     next_step: EmbodiedNextStep | None = None
     settlement_objective: EmbodiedSettlementObjective | None = None
     settlement_objectives: list[EmbodiedSettlementObjective] = Field(default_factory=list)
+    # E21-7g task-board fields (used by the task_* operations).
+    task_title: str | None = Field(default=None, description="Title for task_create.")
+    task_id: str | None = Field(default=None, description="Target id for task_claim/task_complete.")
+    task_evidence: str | None = Field(
+        default=None, description="Optional completion evidence for task_complete."
+    )
 
 
 class SharedStateWriteResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     accepted: bool = Field(description="Whether the update was accepted.")
     formatted: str = Field(description="Updated prompt-friendly blackboard summary.")
+    # E21-7g task-board results (populated only by task_* operations).
+    task_id: str | None = Field(default=None, description="Created/affected task id.")
+    task_status: str | None = Field(
+        default=None, description="Result of a task op: ok|already_claimed|not_found|done|created."
+    )
+    task_owner: str | None = Field(default=None, description="Owning agent after a claim.")
 
 
 class RescueTaskRequest(BaseModel):

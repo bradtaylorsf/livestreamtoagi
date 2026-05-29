@@ -651,6 +651,19 @@ class SharedWorkingState:
                 f"status: {build_site.status}"
             )
 
+        # E21-7g: render the shared task board so agents can observe open work to
+        # claim and in-progress work to support (the emergent observe->claim loop).
+        tasks = await self.get_tasks()
+        active_tasks = [t for t in tasks if t.status != "done"]
+        if active_tasks:
+            open_tasks = [t for t in active_tasks if not t.owner or t.status == "pending"]
+            taken_tasks = [t for t in active_tasks if t.owner and t.status != "pending"]
+            lines.append("**Shared task board** (use !manageTask to propose/claim/complete):")
+            for task in open_tasks[:10]:
+                lines.append(f"  - [OPEN] {task.id}: {task.title} (unclaimed — claim it!)")
+            for task in taken_tasks[:10]:
+                lines.append(f"  - [{task.status}] {task.id}: {task.title} (owner: {task.owner})")
+
         claims = await self.get_agent_claims()
         if claims:
             lines.append("**Agent claims:**")
