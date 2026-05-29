@@ -14,6 +14,7 @@ closing_weight: 0.25
 role_priority_bonus: 0.15
 
 tools:
+  - manage_task
   - execute_code
   - dispatch_alpha
   - send_chat_message

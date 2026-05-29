@@ -139,6 +139,52 @@ def _is_world_changing(intent: ToolIntentRow) -> bool:
     )
 
 
+def _is_manage_task(intent: ToolIntentRow) -> bool:
+    """A successful ``manage_task`` tool intent (task-board lifecycle action)."""
+    if intent.payload.status not in {"executed", "simulated"}:
+        return False
+    name = intent.payload.tool_name.lower().replace("-", "").replace("!", "").replace("_", "")
+    return name == "managetask"
+
+
+def _manage_task_action(intent: ToolIntentRow) -> str | None:
+    action = (intent.payload.args or {}).get("action")
+    return action.lower() if isinstance(action, str) else None
+
+
+def _task_board_objective(intents: list[ToolIntentRow]) -> EvidenceRef | None:
+    """A ``create_task`` posts a shared objective onto the board."""
+    for i in intents:
+        if _manage_task_action(i) == "create_task":
+            return EvidenceRef(
+                tick=i.tick,
+                actor_id=i.actor_id,
+                event_type="tool_intent",
+                note="manage_task:create_task",
+            )
+    return None
+
+
+def _task_board_role_actors(intents: list[ToolIntentRow]) -> set[str]:
+    """Agents who took a role on the board — created (auto-owns) or claimed a task."""
+    actors: set[str] = set()
+    for i in intents:
+        if _manage_task_action(i) in {"create_task", "claim_task"} and i.actor_id:
+            actors.add(i.actor_id)
+    return actors
+
+
+def _task_board_completion_events(intents: list[ToolIntentRow]) -> int:
+    """``update_status`` to ``done``/``blocked`` is a completion/review signal."""
+    count = 0
+    for i in intents:
+        if _manage_task_action(i) == "update_status":
+            status = (i.payload.args or {}).get("status")
+            if isinstance(status, str) and status.lower() in {"done", "blocked"}:
+                count += 1
+    return count
+
+
 def _count_objective_signals(utterances: list[UtteranceRow]) -> EvidenceRef | None:
     for u in utterances:
         text = u.payload.text or ""
@@ -213,10 +259,22 @@ def classify_rows(rows: Iterable[DecisionLogRow]) -> SettlementSmokeOutcome:
     intents = collect_tool_intents(rows)
     world_events = collect_world_events(rows)
 
+    # Task-board lifecycle signals (#908). A run that organizes via ``manage_task``
+    # rather than chat-declared ownership should still classify as collaboration:
+    # create_task → objective, create/claim actors → roles, update_status
+    # done/blocked → completion/review. These are additive to the chat heuristics,
+    # never subtractive, so the existing settlement/regression cases are unchanged.
+    manage_task_intents = [i for i in intents if _is_manage_task(i)]
+
     objective_evidence = _count_objective_signals(utterances)
+    if objective_evidence is None:
+        objective_evidence = _task_board_objective(manage_task_intents)
     shared_objective = objective_evidence is not None
 
-    distinct_role_count, role_actors = _count_distinct_roles(utterances)
+    _, utt_role_actors = _count_distinct_roles(utterances)
+    role_actor_set = set(utt_role_actors) | _task_board_role_actors(manage_task_intents)
+    distinct_role_count = len(role_actor_set)
+    role_actors = sorted(role_actor_set)
 
     world_changing_intents = [i for i in intents if _is_world_changing(i)]
     world_changing_count = len(world_changing_intents) + len(world_events)
@@ -230,7 +288,8 @@ def classify_rows(rows: Iterable[DecisionLogRow]) -> SettlementSmokeOutcome:
         for i in world_changing_intents[:5]
     ]
 
-    review_turns = _count_review_turns(utterances)
+    task_completion_events = _task_board_completion_events(manage_task_intents)
+    review_turns = _count_review_turns(utterances) + task_completion_events
     command_loops = _find_command_loops(intents)
     executed_count = sum(1 for i in intents if i.payload.status in {"executed", "simulated"})
     delegation_events = sum(1 for u in utterances if _ROLE_HINT_RE.search(u.payload.text or ""))
@@ -345,6 +404,14 @@ def classify_rows(rows: Iterable[DecisionLogRow]) -> SettlementSmokeOutcome:
             "executed_or_simulated_intents": executed_count,
             "world_events": len(world_events),
             "world_changing_intents": len(world_changing_intents),
+            "task_board_intents": len(manage_task_intents),
+            "task_create_events": sum(
+                1 for i in manage_task_intents if _manage_task_action(i) == "create_task"
+            ),
+            "task_claim_events": sum(
+                1 for i in manage_task_intents if _manage_task_action(i) == "claim_task"
+            ),
+            "task_completion_events": task_completion_events,
             "delegation_events": delegation_events,
             "ownership_events": ownership_events,
             "distinct_owners": len(distinct_owner_ids),
