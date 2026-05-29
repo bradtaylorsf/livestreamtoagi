@@ -843,7 +843,7 @@ verify_static() {
     # regression path stays untouched. Anchored to the call-site guard + status
     # capture so this verification block does not self-match.
     local emergent_flag_line emergent_guard_line
-    emergent_flag_line="$(grep -nE '^[[:space:]]+--mode emergent \\' "$soak_self" | head -n1 | cut -d: -f1 || true)"
+    emergent_flag_line="$(grep -nE '^[[:space:]]+--mode emergent ' "$soak_self" | head -n1 | cut -d: -f1 || true)"
     emergent_guard_line="$(grep -n '^[[:space:]]*run_emergent_acceptance_report ||' "$soak_self" | head -n1 | cut -d: -f1 || true)"
     if [ -n "$emergent_flag_line" ] && [ -n "$emergent_guard_line" ]; then
         ok "emergent acceptance gate invokes --mode emergent under an emergent-mode guard"
