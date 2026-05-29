@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from core.minecraft.director.build_macro_scheduler import BuildMacroScheduler
 from core.minecraft.director.scene_inbox import Scene, SceneEventType
 from core.minecraft.director.turn_scheduler import SchedulerCandidate
@@ -300,6 +302,78 @@ def test_pending_settlement_objective_owner_can_be_claimed_after_grace() -> None
     assert acquisition.objective_id == "phase-square"
     assert acquisition.phase_owner == "rex"
     assert acquisition.support_assignments["sentinel"].phase_owner == "rex"
+
+
+# ─── E21-7h: emergent claim-based build authorization ──────────────────────
+
+
+def test_select_emergent_build_owners_caps_concurrent_builds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MC_SIM_MAX_CONCURRENT_BUILDS", "2")
+    scheduler = BuildMacroScheduler()
+
+    granted = scheduler.select_emergent_build_owners(
+        scene_id="scene-1",
+        claim_holders=["rex", "vera", "fork", "aurora"],
+        now_ms=1_000,
+    )
+
+    # Only the cap's worth of distinct claim-holders may build at once.
+    assert len(granted) == 2
+    assert granted <= {"rex", "vera", "fork", "aurora"}
+
+    # A fresh claim-holder cannot exceed the cap while the slots are still held.
+    blocked = scheduler.select_emergent_build_owners(
+        scene_id="scene-2",
+        claim_holders=["grok"],
+        now_ms=1_500,
+    )
+    assert blocked == frozenset()
+
+
+def test_select_emergent_build_owners_regrants_active_agent_idempotently(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MC_SIM_MAX_CONCURRENT_BUILDS", "1")
+    scheduler = BuildMacroScheduler()
+
+    first = scheduler.select_emergent_build_owners(
+        scene_id="scene-1", claim_holders=["rex"], now_ms=1_000
+    )
+    assert first == frozenset({"rex"})
+
+    # Re-selecting the same active claim-holder re-grants the same slot — it must
+    # not consume a second concurrency slot or get blocked by the cap.
+    again = scheduler.select_emergent_build_owners(
+        scene_id="scene-1", claim_holders=["rex"], now_ms=1_200
+    )
+    assert again == frozenset({"rex"})
+
+
+def test_select_emergent_build_owners_expires_after_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MC_SIM_MAX_CONCURRENT_BUILDS", "1")
+    monkeypatch.setenv("MC_SIM_BUILD_COOLDOWN_SEC", "300")
+    scheduler = BuildMacroScheduler()
+
+    assert scheduler.select_emergent_build_owners(
+        scene_id="scene-1", claim_holders=["rex"], now_ms=1_000
+    ) == frozenset({"rex"})
+
+    # Within the cooldown window the only slot is still held by rex.
+    assert (
+        scheduler.select_emergent_build_owners(
+            scene_id="scene-1", claim_holders=["vera"], now_ms=1_000 + 299_000
+        )
+        == frozenset()
+    )
+
+    # After the window rex's slot frees and the next claim-holder can build.
+    assert scheduler.select_emergent_build_owners(
+        scene_id="scene-1", claim_holders=["vera"], now_ms=1_000 + 301_000
+    ) == frozenset({"vera"})
 
 
 def test_settlement_objective_denies_non_phase_owner() -> None:
