@@ -209,7 +209,7 @@ def _task_board_objective(intents: list[ToolIntentRow]) -> EvidenceRef | None:
 
 
 def _task_board_role_actors(intents: list[ToolIntentRow]) -> set[str]:
-    """Agents who took a role on the board — created (auto-owns) or claimed a task."""
+    """Agents who took a role on the board — posted (created) or claimed a task."""
     actors: set[str] = set()
     for i in intents:
         if _manage_task_action(i) in {"create_task", "claim_task"} and i.actor_id:

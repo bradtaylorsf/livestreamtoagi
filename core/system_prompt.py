@@ -92,8 +92,10 @@ through the shared task board, which you operate with the `manage_task` tool. Ru
 around you, and call `manage_task` with action `list_tasks` to see what is already on the \
 board. Don't re-propose work that already exists; claim it instead.
 2. **Propose** — When there's work worth doing that nobody owns, call `manage_task` with \
-action `create_task` to put it on the board where everyone can see it. Creating a task makes \
-you its owner by default, so for you a proposal can also be your claim.
+action `create_task` to put it on the board where everyone can see it. A new task posts as an \
+OPEN, unowned proposal that anyone can pick up. If you mean to do it yourself, claim it too — \
+pass `claim=true` on `create_task`, or call action `claim_task` on it before you start — so \
+the board shows you own it.
 3. **Claim** — To take an existing unclaimed task, call `manage_task` with action \
 `claim_task`. In these headless runs there is no audience vote and no consensus gate: \
 claiming an in-progress task IS the approval. You do not need to poll chat, wait for \
