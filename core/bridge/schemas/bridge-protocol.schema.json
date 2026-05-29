@@ -1466,7 +1466,8 @@
             "cooldown",
             "stale",
             "completed",
-            "failed"
+            "failed",
+            "abandoned"
           ],
           "title": "Status",
           "type": "string"
