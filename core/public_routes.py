@@ -398,7 +398,7 @@ def _resolve_headless_sim_folder(sim_id: str) -> Any | None:
     """
     from core.simulation.artifacts import resolve_headless_sim_folder
 
-    return resolve_headless_sim_folder(sim_id)
+    return resolve_headless_sim_folder(sim_id, root=_headless_snapshots_dir())
 
 
 def _extract_leading_comment_block(text: str) -> str:
