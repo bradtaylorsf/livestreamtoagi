@@ -7,6 +7,8 @@ timeline NDJSON into one canonical `timeline.ndjson` without treating malformed
 lines as fatal.
 """
 
+# ruff: noqa: E402,I001
+
 from __future__ import annotations
 
 import argparse
@@ -21,7 +23,13 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = SCRIPT_DIR.parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+sys.path.insert(0, str(SCRIPT_DIR))
+from core.observability.files import write_json_file
+from core.observability.jsonl import write_jsonl
+
 from _minecraft_log_patterns import (
     ACTION_CONTEXT_RE,
     ACTION_TRACE_RE,
@@ -1450,14 +1458,12 @@ def write_artifacts(
 ) -> tuple[Path, Path]:
     timeline_path = output_path or run_dir / "timeline.ndjson"
     totals_path = totals_path or run_dir / "timeline-totals.json"
-    timeline_path.parent.mkdir(parents=True, exist_ok=True)
-    totals_path.parent.mkdir(parents=True, exist_ok=True)
-    with timeline_path.open("w", encoding="utf-8") as handle:
-        for event in result.events:
-            handle.write(json.dumps(event.to_json(), sort_keys=True, separators=(",", ":")) + "\n")
-    totals_path.write_text(
-        json.dumps(result.totals, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    write_jsonl(
+        timeline_path,
+        (event.to_json() for event in result.events),
+        serializer=lambda event: json.dumps(event, sort_keys=True, separators=(",", ":")),
     )
+    write_json_file(totals_path, result.totals, sort_keys=True, trailing_newline=True)
     return timeline_path, totals_path
 
 

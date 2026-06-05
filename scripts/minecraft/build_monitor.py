@@ -17,7 +17,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from core.observability.files import write_text_file  # noqa: E402
 
 DEFAULT_STALL_SECONDS = 120
 DEFAULT_REPEAT_BLANK_COUNT = 3
@@ -2503,8 +2510,7 @@ def build(
         feed_limit=max(1, feed_limit),
     )
     output_path = output or default_output_path(run_dir)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(render_monitor_html(model), encoding="utf-8")
+    write_text_file(output_path, render_monitor_html(model))
     return output_path
 
 

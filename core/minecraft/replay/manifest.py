@@ -8,6 +8,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.observability.files import write_text_file
+
 
 class ScreenshotEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -39,8 +41,7 @@ class ReplayManifest(BaseModel):
     dry_run: bool = True
 
     def write(self, path: Path) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(self.model_dump_json(indent=2) + "\n", encoding="utf-8")
+        write_text_file(path, self.model_dump_json(indent=2), trailing_newline=True)
 
     @classmethod
     def from_path(cls, path: Path) -> ReplayManifest:

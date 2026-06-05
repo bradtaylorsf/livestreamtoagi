@@ -32,6 +32,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from core.civilization.ownership import OwnershipLedger
 from core.civilization.trade import TradeLedger
+from core.observability.jsonl import append_jsonl
 
 logger = logging.getLogger(__name__)
 
@@ -355,8 +356,7 @@ class TheftLedger:
         if self._path is None:
             return
         try:
-            with self._path.open("a", encoding="utf-8") as fh:
-                fh.write(json.dumps(record) + "\n")
+            append_jsonl(self._path, record)
         except OSError:  # pragma: no cover - logging must not break sim
             logger.exception("theft_log: failed to append event")
 

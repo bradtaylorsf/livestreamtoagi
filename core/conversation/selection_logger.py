@@ -6,7 +6,6 @@ for tuning and diagnostics. Supports JSONL export for offline analysis.
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import TYPE_CHECKING
 
@@ -17,6 +16,7 @@ from core.models import (
     SelectionLog,
     SelectionLogCreate,
 )
+from core.observability.jsonl import serialize_jsonl_record
 
 if TYPE_CHECKING:
     import uuid
@@ -162,7 +162,6 @@ class SelectionLogger:
     @staticmethod
     def export_jsonl(records: list[SelectionLog]) -> str:
         """Serialize selection logs to JSONL format (one JSON object per line)."""
-        lines = []
-        for record in records:
-            lines.append(json.dumps(record.model_dump(), default=str))
-        return "\n".join(lines)
+        return "\n".join(
+            serialize_jsonl_record(record.model_dump()) for record in records
+        )

@@ -7,10 +7,10 @@ import os
 from typing import Any
 
 from core.bridge.consumers import ensure_scene_memory_consumer
-from core.bridge.contract import BridgeRequest, DirectorGateRequest
+from core.bridge.contract import BridgeRequest, DirectorGateRequest, DirectorGateResponse
 from core.bridge.handlers.shared_state import _state_for_request
 from core.conversation_mode import is_director_v2_run
-from core.minecraft.director.prompt_gate import get_prompt_gate
+from core.minecraft.director.prompt_gate import PromptDecision, get_prompt_gate
 from core.minecraft.director.timeline import ensure_soak_run_dir_from_run_id
 
 logger = logging.getLogger(__name__)
@@ -21,20 +21,7 @@ async def handle_director_gate(env: BridgeRequest, services: Any | None = None) 
 
     payload = DirectorGateRequest.model_validate(env.payload)
     if not is_director_v2_run():
-        return {
-            "selected": True,
-            "turn_kind": None,
-            "reason": "mode_bypass",
-            "suppression_reason": None,
-            "scene_id": payload.scene_hint or "mode-bypass",
-            "scene_digest": "Director V2 gate bypassed outside director_v2 mode.",
-            "role": "legacy decentralized responder",
-            "local_observations": {},
-            "granted_tools": payload.available_tools,
-            "build_macro": None,
-            "queue_depth": 0,
-            "suppressed_agents": [],
-        }
+        return _mode_bypass_response(payload)
 
     _ensure_scene_memory_evidence_path(env, services)
     gate = get_prompt_gate(env.simulation_id)
@@ -52,20 +39,53 @@ async def handle_director_gate(env: BridgeRequest, services: Any | None = None) 
         payload.agent_id,
         event,
     )
-    return {
-        "selected": decision.selected,
-        "turn_kind": decision.turn_kind,
-        "reason": decision.reason,
-        "suppression_reason": decision.suppression_reason,
-        "scene_id": decision.scene_id,
-        "scene_digest": decision.scene_digest,
-        "role": decision.role,
-        "local_observations": decision.local_observations,
-        "granted_tools": decision.available_tools,
-        "build_macro": decision.build_macro.model_dump() if decision.build_macro else None,
-        "queue_depth": decision.queue_depth,
-        "suppressed_agents": decision.suppressed_agents,
-    }
+    return _decision_response(decision)
+
+
+def _mode_bypass_response(payload: DirectorGateRequest) -> dict[str, Any]:
+    return _response_payload(
+        DirectorGateResponse(
+            selected=True,
+            turn_kind=None,
+            reason="mode_bypass",
+            suppression_reason=None,
+            scene_id=payload.scene_hint or "mode-bypass",
+            scene_digest="Director V2 gate bypassed outside director_v2 mode.",
+            role="legacy decentralized responder",
+            local_observations={},
+            granted_tools=payload.available_tools,
+            build_macro=None,
+            queue_depth=0,
+            suppressed_agents=[],
+        )
+    )
+
+
+def _decision_response(decision: PromptDecision) -> dict[str, Any]:
+    return _response_payload(
+        DirectorGateResponse(
+            selected=decision.selected,
+            turn_kind=decision.turn_kind,
+            reason=decision.reason,
+            suppression_reason=decision.suppression_reason,
+            scene_id=decision.scene_id,
+            scene_digest=decision.scene_digest,
+            role=decision.role,
+            local_observations=decision.local_observations,
+            granted_tools=decision.available_tools,
+            build_macro=decision.build_macro.model_dump(mode="json")
+            if decision.build_macro
+            else None,
+            queue_depth=decision.queue_depth,
+            suppressed_agents=decision.suppressed_agents,
+        )
+    )
+
+
+def _response_payload(response: DirectorGateResponse) -> dict[str, Any]:
+    """Return a contract-validated Director payload for direct and WS callers."""
+
+    return response.model_dump(mode="json")
 
 
 async def _claimed_task_owners(env: BridgeRequest, services: Any | None) -> list[str]:

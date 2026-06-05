@@ -28,6 +28,7 @@ from core.eval.headless_signals import (
     collect_world_events,
 )
 from core.eval.prompt_loader import load_prompt
+from core.observability.files import write_json_file
 from core.simulation.decision_log_schema import DecisionLogRow, UtteranceRow
 from core.simulation.decision_logger import DecisionLogReader
 
@@ -289,7 +290,7 @@ class HeadlessScorer:
         }
 
         output_path = self._sim_folder / EVAL_SCORES_FILENAME
-        output_path.write_text(json.dumps(result, indent=2, default=str))
+        write_json_file(output_path, result)
         return result
 
     # ─── LLM-judge ────────────────────────────────────────────────────
@@ -442,9 +443,8 @@ class HeadlessScorer:
             return None
 
     def _write_cache(self, log_hash: str, key: str, payload: dict[str, Any]) -> None:
-        self._cache_dir.mkdir(parents=True, exist_ok=True)
         try:
-            self._cache_path(log_hash, key).write_text(json.dumps(payload, indent=2, default=str))
+            write_json_file(self._cache_path(log_hash, key), payload)
         except OSError as exc:
             logger.warning("headless_scorer: cache write failed for %s: %s", key, exc)
 

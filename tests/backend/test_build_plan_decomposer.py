@@ -17,7 +17,6 @@ from core.minecraft.build_plan_decomposer import (
     OpenRouterClaudeVisionProvider,
 )
 
-
 # ─── Fake provider used by every decomposer test ──────────────────
 
 

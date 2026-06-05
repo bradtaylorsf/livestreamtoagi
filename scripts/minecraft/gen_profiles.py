@@ -105,6 +105,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from core.models import FactionConfig, PersonaOverride  # noqa: E402
+from core.observability.files import write_json_file, write_text_file  # noqa: E402
 
 # Agents that are deliberately never spawned as world bots, so no Mindcraft
 # profile is generated for them. Management is a content filter applied
@@ -672,7 +673,12 @@ def main(argv: list[str] | None = None) -> int:
             out_dir.mkdir(parents=True, exist_ok=True)
             for agent_id, profile in profiles.items():
                 profile_path = out_dir / _profile_filename(agent_id)
-                profile_path.write_text(json.dumps(profile, indent=4) + "\n")
+                write_json_file(
+                    profile_path,
+                    profile,
+                    indent=4,
+                    trailing_newline=True,
+                )
             print(f"✓ Wrote {len(profiles)} profiles to {out_dir}", file=sys.stderr)
         return 0
 
@@ -695,7 +701,7 @@ def main(argv: list[str] | None = None) -> int:
         print(rendered)
     else:
         out_path = Path(args.out)
-        out_path.write_text(rendered + "\n")
+        write_text_file(out_path, rendered, trailing_newline=True)
         print(f"✓ Wrote {args.out}", file=sys.stderr)
     return 0
 

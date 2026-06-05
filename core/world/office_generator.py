@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from core.world.pixellab_client import PixelLabClient
 
+from core.observability.files import write_json_file
+
 logger = logging.getLogger(__name__)
 
 OFFICE_LAYOUT_PATH = Path("config/office_layout.json")
@@ -84,7 +86,7 @@ class OfficeGenerator:
         tilemap = self._assemble_tilemap(layout, tile_assets)
 
         tilemap_path = self._output_dir / "tilemap.json"
-        tilemap_path.write_text(json.dumps(tilemap, indent=2))
+        write_json_file(tilemap_path, tilemap)
         logger.info("Tilemap written to %s", tilemap_path)
 
         return tilemap

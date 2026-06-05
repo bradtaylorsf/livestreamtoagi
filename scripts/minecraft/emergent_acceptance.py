@@ -17,7 +17,6 @@ builder already emits — so the soak and tests can call it in seconds.
 
 from __future__ import annotations
 
-import json
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -42,6 +41,7 @@ from core.eval.settlement_smoke_signals import (  # noqa: E402
     SettlementSmokeOutcome,
     classify_sim_folder,
 )
+from core.observability.files import write_json_file, write_text_file  # noqa: E402
 
 # Part-3 acceptance thresholds. Encoded as data so the soak / tests can tune them
 # without editing the criteria logic.
@@ -277,10 +277,13 @@ def write_artifacts(
     run_dir = Path(run_dir)
     json_path = run_dir / "emergent-acceptance.json"
     md_path = run_dir / "emergent-acceptance.md"
-    json_path.write_text(json.dumps(result.to_json(), indent=2, sort_keys=True) + "\n", "utf-8")
-    md_path.write_text(
-        result_markdown(result, run_dir=run_dir, sim_folder=sim_folder), encoding="utf-8"
+    write_json_file(
+        json_path,
+        result.to_json(),
+        sort_keys=True,
+        trailing_newline=True,
     )
+    write_text_file(md_path, result_markdown(result, run_dir=run_dir, sim_folder=sim_folder))
     return json_path, md_path
 
 

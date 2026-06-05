@@ -9,6 +9,8 @@ make the implementation look current.
 - [Minecraft pivot issue plan](MINECRAFT-PIVOT-ISSUE-PLAN.md)
 - [Minecraft pivot decision summary](decisions/0000-summary.md)
 - [Run modes](run-modes.md)
+- [Artifact policy](artifact-policy.md)
+- [Graphify civilization-builder review](graphify-civilization-builder-review.md)
 
 ## Decision Records
 

@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from core.world.pixellab_client import PixelLabClient
 
+from core.observability.files import write_json_file
+
 logger = logging.getLogger(__name__)
 
 SPRITES_DIR = Path("frontend/assets/sprites")
@@ -166,7 +168,7 @@ class SpriteGenerator:
             "animations": {name: {"start": i, "end": i} for i, name in enumerate(AGENT_ANIMATIONS)},
             "spritesheet": str(dest),
         }
-        metadata_path.write_text(json.dumps(metadata, indent=2))
+        write_json_file(metadata_path, metadata)
         logger.info("Generated sprite sheet for %s", agent_id)
         return metadata
 
@@ -210,7 +212,7 @@ class SpriteGenerator:
             "animations": {name: {"start": i, "end": i} for i, name in enumerate(ALPHA_ANIMATIONS)},
             "spritesheet": str(dest),
         }
-        metadata_path.write_text(json.dumps(metadata, indent=2))
+        write_json_file(metadata_path, metadata)
         logger.info("Generated sprite sheet for alpha")
         return metadata
 

@@ -25,6 +25,7 @@ import yaml
 
 from core.agents.build_intent import SizeClass, StructureType
 from core.minecraft.build_plan import BuildPlan
+from core.observability.files import write_text_file
 
 logger = logging.getLogger(__name__)
 
@@ -215,8 +216,7 @@ class BlueprintDecomposer:
             return None
 
     def _write_cache(self, cache_path: Path, plan: BuildPlan) -> None:
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        cache_path.write_text(plan.model_dump_json(indent=2), encoding="utf-8")
+        write_text_file(cache_path, plan.model_dump_json(indent=2))
 
 
 def _load_intent_hints(folder: Path) -> dict[str, Any]:

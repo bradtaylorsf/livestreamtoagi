@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 
 from core.bridge.consumers import get_scene_memory_consumer, unregister_scene_memory_consumer
-from core.bridge.contract import BridgeRequest, CostContext
+from core.bridge.contract import BridgeRequest, CostContext, DirectorGateResponse
 from core.bridge.handlers.director import handle_director_gate
 from core.bridge.server import build_bridge_response_with_services
 from core.event_bus import EventBus
@@ -191,6 +191,8 @@ async def test_mode_bypass_returns_selected_true_when_legacy(
 
     assert [response["selected"] for response in responses] == [True] * len(AGENTS)
     assert {response["reason"] for response in responses} == {"mode_bypass"}
+    for response in responses:
+        DirectorGateResponse.model_validate(response)
 
 
 async def test_director_v2_mode_routes_through_scheduler(
@@ -238,6 +240,18 @@ async def test_director_gate_bridge_response_surfaces_prompt_decision(
     assert response.payload["selected"] is True
     assert response.payload["queue_depth"] == 1
     assert "scene_digest" in response.payload
+
+
+async def test_director_gate_direct_handler_returns_contract_valid_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CONVERSATION_MODE", "director_v2")
+
+    response = await handle_director_gate(_bridge_request(_event(agent_id="vera")), services=None)
+
+    parsed = DirectorGateResponse.model_validate(response)
+    assert parsed.selected is True
+    assert parsed.granted_tools == response["granted_tools"]
 
 
 async def test_director_gate_lazily_registers_scene_memory_consumer(

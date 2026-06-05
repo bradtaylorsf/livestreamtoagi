@@ -29,6 +29,8 @@ from pathlib import Path
 
 import httpx
 
+from core.observability.jsonl import append_jsonl
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_CONSOLE_LOG_PATH = "/tmp/livestream-agi-emails.jsonl"
@@ -58,9 +60,7 @@ def _write_console_log(record: dict[str, object]) -> None:
     # fails open-for-append with IsADirectoryError, silently breaking capture.
     path = Path(os.environ.get("EMAIL_CONSOLE_LOG", "") or DEFAULT_CONSOLE_LOG_PATH)
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(record) + "\n")
+        append_jsonl(path, record)
     except OSError as exc:
         logger.warning("[email:console] failed to write %s: %s", path, exc)
 

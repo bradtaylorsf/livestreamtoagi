@@ -18,6 +18,13 @@ DEFAULT_WARMUP_SECONDS = 300
 DEFAULT_MAX_SELECTED_AGENT_RATIO = 0.5
 DEFAULT_AGENTS = "alpha vera rex aurora pixel fork sentinel grok"
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from core.observability.files import write_json_file, write_text_file  # noqa: E402
+from core.observability.jsonl import write_jsonl  # noqa: E402
+
 DIRECTOR_DECISION_EVENTS = {
     "director.gate.decision",
     "director.scene.opened",
@@ -190,10 +197,11 @@ def boolish(value: Any) -> bool:
 
 
 def write_ndjson(path: Path, rows: list[dict[str, Any]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as handle:
-        for row in rows:
-            handle.write(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n")
+    write_jsonl(
+        path,
+        rows,
+        serializer=lambda row: json.dumps(row, sort_keys=True, separators=(",", ":")),
+    )
 
 
 def total_agents(metadata: dict[str, str], events: list[dict[str, Any]]) -> int:
@@ -992,8 +1000,8 @@ def main(argv: list[str] | None = None) -> int:
 
     json_path = args.run_dir / "acceptance-report.json"
     md_path = args.run_dir / "acceptance-report.md"
-    json_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    md_path.write_text(report_markdown(report), encoding="utf-8")
+    write_json_file(json_path, report, sort_keys=True, trailing_newline=True)
+    write_text_file(md_path, report_markdown(report))
     print(f"ok director acceptance report {report['overall_status']}; see {json_path}")
     return 0 if report["overall_status"] == "pass" else 1
 

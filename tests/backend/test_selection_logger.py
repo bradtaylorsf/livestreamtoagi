@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -19,7 +19,6 @@ from core.models import (
     SelectionLogCreate,
     SelectionResult,
 )
-
 
 # ── Fixtures ────────────────────────────────────────────────
 
@@ -304,7 +303,7 @@ async def test_config_hash_passed_through():
 
 def test_export_jsonl_produces_valid_jsonl():
     """export_jsonl produces valid JSONL with one JSON object per line."""
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     records = [
         SelectionLog(
             id=1,

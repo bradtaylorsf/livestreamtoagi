@@ -40,6 +40,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.observability.jsonl import append_jsonl
+
 logger = logging.getLogger(__name__)
 
 _CONFLICT_LOG_FILENAME = "conflict_log.jsonl"
@@ -1031,8 +1033,7 @@ class ConflictLedger:
         if self._path is None:
             return
         try:
-            with self._path.open("a", encoding="utf-8") as fh:
-                fh.write(json.dumps(record) + "\n")
+            append_jsonl(self._path, record)
         except OSError:  # pragma: no cover - logging must not break sim
             logger.exception("conflict_log: failed to append event")
 

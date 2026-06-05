@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import os
 import sys
 from pathlib import Path
@@ -31,6 +30,7 @@ from core.minecraft.cloud_providers import (
     GeminiVisionDecomposer,
     OpenAIImageProvider,
 )
+from core.observability.files import write_json_file, write_text_file
 
 DEFAULT_CONCEPT = "Roman Watchtower with Crenellated Battlements"
 
@@ -63,7 +63,7 @@ async def run(prompt: str, output_dir: Path, structure_type: str, size_class: st
     )
     plan_dict.setdefault("source_image_id", "smoke:blueprint.png")
     plan_path = output_dir / "build_plan.json"
-    plan_path.write_text(json.dumps(plan_dict, indent=2))
+    write_json_file(plan_path, plan_dict)
     print(f"    saved BuildPlan -> {plan_path}")
 
     try:
@@ -90,7 +90,7 @@ async def run(prompt: str, output_dir: Path, structure_type: str, size_class: st
         seed=42,
     )
     script_path = output_dir / "build_script.json"
-    script_path.write_text(script.model_dump_json(indent=2))
+    write_text_file(script_path, script.model_dump_json(indent=2))
     print(
         f"    script ok: {len(script.commands)} commands, "
         f"{script.total_blocks} blocks, ~{script.estimated_seconds:.1f}s build, "

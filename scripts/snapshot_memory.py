@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import sys
 from pathlib import Path
 
@@ -18,6 +17,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from dotenv import load_dotenv  # noqa: E402
+
+from core.observability.files import write_json_file  # noqa: E402
 
 load_dotenv(PROJECT_ROOT / ".env")
 
@@ -41,8 +42,7 @@ async def run_export(args: argparse.Namespace) -> None:
         snapshot = await exporter.export(args.simulation_id, agents=agents)
 
         output_path = Path(args.output)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(json.dumps(snapshot, indent=2, default=str))
+        write_json_file(output_path, snapshot)
         print(f"Snapshot exported to {output_path}")
         print(f"  Agents: {list(snapshot.get('agents', {}).keys())}")
         print(f"  Relationships: {len(snapshot.get('relationships', []))}")

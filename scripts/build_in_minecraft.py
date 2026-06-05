@@ -35,7 +35,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import os
 import sys
 import time
@@ -51,6 +50,7 @@ from core.minecraft.cloud_providers import (
     GeminiVisionDecomposer,
     OpenAIImageProvider,
 )
+from core.observability.files import write_json_file, write_text_file
 
 
 def _parse_origin(raw: str) -> Position3D:
@@ -71,7 +71,7 @@ async def _generate(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     prompt = build_image_prompt(intent)
-    (output_dir / "prompt.txt").write_text(prompt)
+    write_text_file(output_dir / "prompt.txt", prompt)
     print(f"[1/3] generating image via {OpenAIImageProvider.model_id}...")
     img_provider = OpenAIImageProvider()
     image_bytes = await img_provider.generate(prompt)
@@ -93,7 +93,7 @@ async def _generate(
         size_class=intent.size_class,
     )
     plan_dict.setdefault("source_image_id", f"build:{image_path.name}")
-    (output_dir / "build_plan.json").write_text(json.dumps(plan_dict, indent=2))
+    write_json_file(output_dir / "build_plan.json", plan_dict)
     plan = BuildPlan.model_validate(plan_dict)
     print(
         f"      plan ok: footprint={plan.footprint.bbox.w}×{plan.footprint.bbox.h}, "
@@ -110,7 +110,7 @@ async def _generate(
         seed=42,
     )
     script_path = output_dir / "build_script.json"
-    script_path.write_text(script.model_dump_json(indent=2))
+    write_text_file(script_path, script.model_dump_json(indent=2))
     print(
         f"      script ok: {len(script.commands)} commands, "
         f"{script.total_blocks:,} blocks, "
@@ -180,12 +180,12 @@ async def _send_rcon(
     from core.minecraft.build_executors import async_safe_mcrcon_class
     from core.minecraft.terrain import auto_ground_script, make_rcon_block_matcher
 
-    MCRcon = async_safe_mcrcon_class()
+    mcrcon_class = async_safe_mcrcon_class()
 
     sent = 0
     skipped = 0
     final_script = script
-    with MCRcon(host, password, port=port, timeout=10) as mcr:
+    with mcrcon_class(host, password, port=port, timeout=10) as mcr:
         foundation_cmds: list[str] = []
         if auto_ground:
             matcher = make_rcon_block_matcher(mcr)

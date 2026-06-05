@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Any
 
 # Ensure project root is importable
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -761,8 +762,6 @@ def _sim_view(args: list[str]) -> None:
     async def _run() -> None:
         from core.bootstrap import bootstrap_services, shutdown_services
         from core.repos.simulation_repo import SimulationRepo
-        from core.repos.cost_repo import CostRepo
-        import uuid as uuid_mod
 
         svc = await bootstrap_services()
         try:
@@ -860,7 +859,6 @@ def _sim_delete(args: list[str]) -> None:
     async def _run() -> None:
         from core.bootstrap import bootstrap_services, shutdown_services
         from core.repos.simulation_repo import SimulationRepo
-        import uuid as uuid_mod
 
         svc = await bootstrap_services()
         try:
@@ -998,9 +996,9 @@ def _sim_export(args: list[str]) -> None:
 
     async def _run() -> None:
         from core.bootstrap import bootstrap_services, shutdown_services
+        from core.observability.files import write_json_file
         from core.repos.simulation_repo import SimulationRepo
         from core.simulation.snapshot import SimulationSnapshotExporter
-        import json as _json
 
         svc = await bootstrap_services()
         try:
@@ -1015,9 +1013,7 @@ def _sim_export(args: list[str]) -> None:
             snapshot_data = await exporter.export(str(sim.id))
 
             out = output_path or f"snapshots/full-{sim.name}.json"
-            from pathlib import Path
-            Path(out).parent.mkdir(parents=True, exist_ok=True)
-            Path(out).write_text(_json.dumps(snapshot_data, indent=2, default=str))
+            write_json_file(out, snapshot_data)
 
             agent_count = len(snapshot_data.get("agents", {}))
             chunk_count = len(snapshot_data.get("world_chunks", []))
@@ -1064,13 +1060,14 @@ def _sim_import(args: list[str]) -> None:
             i += 1
 
     async def _run() -> None:
-        from pathlib import Path
         import json as _json
         import time as _time
+        from pathlib import Path
+
         from core.bootstrap import bootstrap_services, shutdown_services
+        from core.models import SimulationCreate
         from core.repos.simulation_repo import SimulationRepo
         from core.simulation.snapshot import SimulationSnapshotImporter
-        from core.models import SimulationCreate
 
         snapshot_path = Path(filepath)
         if not snapshot_path.exists():
@@ -1132,9 +1129,6 @@ def _sim_import(args: list[str]) -> None:
 
 def _sim_seed(args: list[str]) -> None:
     """Seed a new simulation from a template: pnpm chat sim seed [template-name] [--name name]"""
-    import asyncio
-    from pathlib import Path
-
     seeds_dir = PROJECT_ROOT / "scenarios" / "seeds"
     available = list(seeds_dir.glob("*.json")) if seeds_dir.exists() else []
 
@@ -1210,9 +1204,9 @@ def _sim_capture_live(args: list[str]) -> None:
 
     async def _run() -> None:
         from core.bootstrap import bootstrap_services, shutdown_services
-        from core.simulation.snapshot import SimulationSnapshotExporter
         from core.constants import LIVE_SIMULATION_ID
-        import json as _json
+        from core.observability.files import write_json_file
+        from core.simulation.snapshot import SimulationSnapshotExporter
         import time as _time
 
         svc = await bootstrap_services()
@@ -1222,9 +1216,7 @@ def _sim_capture_live(args: list[str]) -> None:
             snapshot_data = await exporter.export(str(LIVE_SIMULATION_ID))
 
             out = output_path or f"snapshots/live-capture-{_time.strftime('%Y%m%d-%H%M%S')}.json"
-            from pathlib import Path
-            Path(out).parent.mkdir(parents=True, exist_ok=True)
-            Path(out).write_text(_json.dumps(snapshot_data, indent=2, default=str))
+            write_json_file(out, snapshot_data)
 
             agent_count = len(snapshot_data.get("agents", {}))
             chunk_count = len(snapshot_data.get("world_chunks", []))

@@ -34,6 +34,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.observability.jsonl import append_jsonl
+
 logger = logging.getLogger(__name__)
 
 _DIPLOMACY_LOG_FILENAME = "diplomacy_log.jsonl"
@@ -448,8 +450,7 @@ class DiplomacyLedger:
         if self._path is None:
             return
         try:
-            with self._path.open("a", encoding="utf-8") as fh:
-                fh.write(json.dumps(record) + "\n")
+            append_jsonl(self._path, record)
         except OSError:  # pragma: no cover - logging must not break sim
             logger.exception("diplomacy_log: failed to append event")
 

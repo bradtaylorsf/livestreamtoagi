@@ -31,6 +31,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
+from core.observability.jsonl import append_jsonl
+
 logger = logging.getLogger(__name__)
 
 _OWNERSHIP_LOG_FILENAME = "ownership_log.jsonl"
@@ -306,8 +308,7 @@ class OwnershipLedger:
             "wall_time": datetime.now(UTC).isoformat(),
         }
         try:
-            with self._path.open("a", encoding="utf-8") as fh:
-                fh.write(json.dumps(record) + "\n")
+            append_jsonl(self._path, record)
         except OSError:  # pragma: no cover - logging must not break sim
             logger.exception("ownership_log: failed to append event")
 
