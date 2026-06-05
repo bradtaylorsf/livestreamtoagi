@@ -27,7 +27,9 @@ from core.models import (
     WorldChunk,
     WorldEvent,
 )
+from core.observability.files import write_json_file
 from core.repos.conversation_repo import ConversationRepo
+from core.simulation.launch import build_run_simulation_command, launch_detached
 
 logger = logging.getLogger(__name__)
 
@@ -382,9 +384,9 @@ def _scenarios_dir() -> Any:
 
 def _headless_snapshots_dir() -> Any:
     """Return the root folder under which headless sim artifacts are written."""
-    from pathlib import Path
+    from core.simulation.artifacts import headless_snapshots_dir
 
-    return Path(__file__).resolve().parent.parent / "snapshots" / "headless"
+    return headless_snapshots_dir()
 
 
 def _resolve_headless_sim_folder(sim_id: str) -> Any | None:
@@ -394,25 +396,9 @@ def _resolve_headless_sim_folder(sim_id: str) -> Any | None:
     This helper scans those folders for the matching ``metadata.json`` so the
     public API can serve the JSON without a DB lookup.
     """
-    import json as _json
-    from pathlib import Path
+    from core.simulation.artifacts import resolve_headless_sim_folder
 
-    root = _headless_snapshots_dir()
-    if not root.is_dir():
-        return None
-    for entry in sorted(root.iterdir(), reverse=True):
-        if not entry.is_dir():
-            continue
-        meta_path = entry / "metadata.json"
-        if not meta_path.is_file():
-            continue
-        try:
-            meta = _json.loads(meta_path.read_text())
-        except (OSError, _json.JSONDecodeError):
-            continue
-        if meta.get("simulation_id") == sim_id or entry.name == sim_id:
-            return Path(entry)
-    return None
+    return resolve_headless_sim_folder(sim_id)
 
 
 def _extract_leading_comment_block(text: str) -> str:
@@ -3093,44 +3079,14 @@ def _write_public_run_files(project_root: Any, sim_id: uuid.UUID, config: dict[s
     memory_seed = run_config.get("memory_seed")
     if isinstance(memory_seed, dict) and memory_seed.get("mode") == "custom":
         seed_path = run_dir / "memory_seed.json"
-        seed_path.write_text(json.dumps(memory_seed.get("data"), indent=2, sort_keys=True))
+        write_json_file(seed_path, memory_seed.get("data"), sort_keys=True)
         run_config["memory_seed"] = {
             "mode": "custom",
             "custom_file": str(seed_path),
         }
     run_config_path = run_dir / "run_config.json"
-    run_config_path.write_text(json.dumps(run_config, indent=2, sort_keys=True))
+    write_json_file(run_config_path, run_config, sort_keys=True)
     return run_config_path
-
-
-def _build_public_simulation_command(
-    *,
-    project_root: Any,
-    sim_name: str,
-    scenario_path: Any,
-    max_cost: float,
-    sim_id: uuid.UUID,
-    agents: list[str],
-    run_config_file: Any,
-) -> list[str]:
-    import sys
-
-    return [
-        sys.executable,
-        str(project_root / "scripts" / "run_simulation.py"),
-        "--name",
-        sim_name,
-        "--seed-file",
-        str(scenario_path),
-        "--agents",
-        ",".join(agents),
-        "--max-cost",
-        str(max_cost),
-        "--sim-id",
-        str(sim_id),
-        "--run-config-file",
-        str(run_config_file),
-    ]
 
 
 @router.post("/simulations/submit", response_model=PublicSubmitResponse)
@@ -3148,7 +3104,6 @@ async def submit_public_simulation(
       * 5 submissions / user / day via Redis counter
     """
     import os
-    import subprocess
     from datetime import UTC, datetime, timedelta
     from decimal import Decimal
     from pathlib import Path
@@ -3260,10 +3215,10 @@ async def submit_public_simulation(
     )
 
     run_config_file = _write_public_run_files(project_root, sim.id, public_run_config)
-    cmd = _build_public_simulation_command(
+    cmd = build_run_simulation_command(
         project_root=project_root,
-        sim_name=sim_name,
-        scenario_path=candidate,
+        name=sim_name,
+        seed_file=candidate,
         max_cost=max_cost,
         sim_id=sim.id,
         agents=public_run_config["effective_agents"],
@@ -3271,13 +3226,7 @@ async def submit_public_simulation(
     )
     # Skip subprocess spawn during pytest — tests assert on row creation.
     if not os.environ.get("PYTEST_CURRENT_TEST"):
-        subprocess.Popen(  # noqa: S603
-            cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-            cwd=str(project_root),
-        )
+        launch_detached(cmd, cwd=project_root)
 
     eta = (datetime.now(UTC) + timedelta(minutes=5)).isoformat()
     return PublicSubmitResponse(

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import time
 from datetime import UTC, datetime
@@ -32,7 +31,7 @@ from core.simulation.decision_log_schema import (
     WorldEventPayload,
     WorldEventRow,
 )
-from core.simulation.decision_logger import DecisionLogReader, DecisionLogger
+from core.simulation.decision_logger import DecisionLogger, DecisionLogReader
 from core.simulation.embodiment import HeadlessExecutor, ToolIntent
 
 

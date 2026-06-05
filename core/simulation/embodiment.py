@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from core.models import RunMode
+from core.observability.jsonl import append_jsonl
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -309,7 +310,6 @@ def _append_build_intent(sim_folder: Path | None, intent: ToolIntent) -> None:
     if sim_folder is None:
         return
     try:
-        sim_folder.mkdir(parents=True, exist_ok=True)
         path = sim_folder / _BUILD_INTENTS_FILENAME
         payload: dict[str, Any] = {
             "intent_id": intent.intent_id,
@@ -317,8 +317,7 @@ def _append_build_intent(sim_folder: Path | None, intent: ToolIntent) -> None:
             "submitted_at": intent.submitted_at,
             "args": intent.args,
         }
-        with path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(payload, default=str) + "\n")
+        append_jsonl(path, payload)
     except Exception:  # pragma: no cover - logging only
         logger.exception("failed to append build intent to %s", sim_folder)
 

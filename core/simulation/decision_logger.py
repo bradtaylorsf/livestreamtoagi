@@ -10,7 +10,6 @@ state. Replay tools and eval scorers consume this file via
 
 from __future__ import annotations
 
-import io
 import json
 import logging
 from collections.abc import Iterator
@@ -20,6 +19,7 @@ from typing import Any
 
 from pydantic import TypeAdapter, ValidationError
 
+from core.observability.jsonl import JsonlWriter
 from core.simulation.decision_log_schema import (
     SCHEMA_VERSION,
     AllianceDeltaPayload,
@@ -71,10 +71,12 @@ class DecisionLogger:
         fsync_per_tick: bool = False,
     ) -> None:
         self._sim_folder = Path(sim_folder)
-        self._sim_folder.mkdir(parents=True, exist_ok=True)
         self._path = self._sim_folder / _DECISION_LOG_FILENAME
-        self._file: io.TextIOBase | None = self._path.open("a", encoding="utf-8")
-        self._fsync_per_tick = fsync_per_tick
+        self._writer = JsonlWriter(
+            self._path,
+            flush_per_write=fsync_per_tick,
+            closed_message="DecisionLogger is closed; cannot write more rows",
+        )
         self._tick = 0
         self._started_at = datetime.now(UTC)
 
@@ -509,16 +511,10 @@ class DecisionLogger:
     # ─── Lifecycle ─────────────────────────────────────────────────────
 
     def flush(self) -> None:
-        if self._file is not None:
-            self._file.flush()
+        self._writer.flush()
 
     def close(self) -> None:
-        if self._file is not None:
-            try:
-                self._file.flush()
-            finally:
-                self._file.close()
-                self._file = None
+        self._writer.close()
 
     def __enter__(self) -> DecisionLogger:
         return self
@@ -529,12 +525,7 @@ class DecisionLogger:
     # ─── Internal write ────────────────────────────────────────────────
 
     def _write(self, row: Any) -> None:
-        if self._file is None:
-            raise RuntimeError("DecisionLogger is closed; cannot write more rows")
-        line = row.model_dump_json() + "\n"
-        self._file.write(line)
-        if self._fsync_per_tick:
-            self._file.flush()
+        self._writer.write(row)
 
 
 class DecisionLogReader:

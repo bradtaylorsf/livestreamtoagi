@@ -112,8 +112,11 @@ snapshots/              Memory/simulation fixtures
 ```
 
 Local runtime directories such as `mindcraft/`, `minecraft-server/`,
-`minecraft-server-easy/`, `logs/`, `videos/`, and `node_modules/` are ignored.
-They are generated or cloned locally and should not be committed.
+`minecraft-server-easy/`, `logs/`, `artifacts/`, `videos/`, `graphify-out/`,
+`graphify-corpus/`, and `node_modules/` are ignored. They are generated or
+cloned locally and should not be committed. See
+[docs/artifact-policy.md](docs/artifact-policy.md) for the promotion rule for
+fixtures, reports, and Graphify output.
 
 ## Prerequisites
 

@@ -24,7 +24,6 @@ report reflects blackboard truth.
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import sys
 import uuid
@@ -35,6 +34,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from core.observability.jsonl import write_jsonl  # noqa: E402
 from core.redis_client import RedisClient  # noqa: E402
 from core.redis_keys import ScopedRedis  # noqa: E402
 from core.shared_state import SettlementObjective, SharedWorkingState  # noqa: E402
@@ -136,11 +136,8 @@ def write_seed_timeline(
     if not run_dir:
         return None
     raw_dir = Path(run_dir) / "timeline-raw"
-    raw_dir.mkdir(parents=True, exist_ok=True)
     path = raw_dir / SEED_TIMELINE_FILENAME
-    with path.open("w", encoding="utf-8") as handle:
-        for objective in objectives:
-            handle.write(json.dumps(seed_timeline_event(objective, ts=ts)) + "\n")
+    write_jsonl(path, (seed_timeline_event(objective, ts=ts) for objective in objectives))
     return path
 
 

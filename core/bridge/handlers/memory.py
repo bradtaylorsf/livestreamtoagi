@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from dataclasses import dataclass
 from typing import Any
 from weakref import WeakValueDictionary
 
@@ -27,6 +28,14 @@ MEMORY_WRITE_IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60
 _MEMORY_WRITE_CACHE_ATTR = "_bridge_memory_write_cache"
 _MEMORY_WRITE_LOCKS: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
 _MEMORY_WRITE_LOCKS_GUARD = asyncio.Lock()
+
+
+@dataclass(frozen=True, slots=True)
+class MemoryReadResult:
+    """Bridge payload plus content-size metadata for memory reads."""
+
+    payload: dict[str, Any]
+    result_size: int
 
 
 def _simulation_uuid(value: str) -> uuid.UUID | None:
@@ -59,6 +68,10 @@ def _local_memory_write_cache(services: Any) -> dict[str, str]:
 
 def _idempotency_redis(services: Any) -> Any | None:
     return getattr(services, "scoped_redis", None) or getattr(services, "redis", None)
+
+
+def _recall_backend(services: Any) -> Any:
+    return getattr(services, "memory_backend", None) or services.recall_memory
 
 
 async def _cached_memory_write_id(services: Any, key: str) -> str | None:
@@ -117,32 +130,62 @@ async def handle_memory_read(env: BridgeRequest, services: Any) -> dict[str, Any
     simulation_id = _simulation_uuid(env.simulation_id)
 
     if payload.tier == "core":
-        core_memory = await services.core_memory.get_core_memory(
+        result = await _read_core_memory(
+            services,
             env.agent_id,
-            simulation_id=simulation_id,
+            simulation_id,
         )
-        _log_memory_read(
-            agent_id=env.agent_id,
-            tier=payload.tier,
-            simulation_id=simulation_id,
-            result_size=len(core_memory or ""),
-        )
-        return {"results": [], "core_memory": core_memory}
 
-    recall_backend = getattr(services, "memory_backend", None) or services.recall_memory
-    formatted = await recall_backend.retrieve_recall_memories(
-        env.agent_id,
-        payload.query,
-        limit=payload.limit,
-        simulation_id=simulation_id,
-    )
+    else:
+        result = await _read_recall_memory(
+            services,
+            env.agent_id,
+            payload.query,
+            payload.limit,
+            simulation_id,
+        )
+
     _log_memory_read(
         agent_id=env.agent_id,
         tier=payload.tier,
         simulation_id=simulation_id,
+        result_size=result.result_size,
+    )
+    return result.payload
+
+
+async def _read_core_memory(
+    services: Any,
+    agent_id: str,
+    simulation_id: uuid.UUID | None,
+) -> MemoryReadResult:
+    core_memory = await services.core_memory.get_core_memory(
+        agent_id,
+        simulation_id=simulation_id,
+    )
+    return MemoryReadResult(
+        payload={"results": [], "core_memory": core_memory},
+        result_size=len(core_memory or ""),
+    )
+
+
+async def _read_recall_memory(
+    services: Any,
+    agent_id: str,
+    query: str,
+    limit: int,
+    simulation_id: uuid.UUID | None,
+) -> MemoryReadResult:
+    formatted = await _recall_backend(services).retrieve_recall_memories(
+        agent_id,
+        query,
+        limit=limit,
+        simulation_id=simulation_id,
+    )
+    return MemoryReadResult(
+        payload={"results": [], "formatted": formatted},
         result_size=len(formatted or ""),
     )
-    return {"results": [], "formatted": formatted}
 
 
 async def handle_memory_write(env: BridgeRequest, services: Any) -> dict[str, Any]:

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from core.observability.jsonl import append_jsonl
 
 logger = logging.getLogger(__name__)
 
@@ -43,9 +44,7 @@ def emit_director_timeline_event(
 
     try:
         path = target_run_dir / "timeline-raw" / DIRECTOR_TIMELINE_FILENAME
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(record, sort_keys=True, default=str) + "\n")
+        append_jsonl(path, record, sort_keys=True)
     except OSError:
         logger.debug("Director V2 timeline event write failed", exc_info=True)
 

@@ -6,6 +6,8 @@ machine contract, so this script looks for conservative action-command,
 parser, execution, and verification markers in per-bot stdout/stderr logs.
 """
 
+# ruff: noqa: E402
+
 from __future__ import annotations
 
 import argparse
@@ -18,7 +20,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+SCRIPT_DIR = Path(__file__).resolve().parent
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
 from _minecraft_log_patterns import (
     ACTION_CONTEXT_RE,
     COMMAND_RE,
@@ -32,6 +40,8 @@ from _minecraft_log_patterns import (
     VERIFICATION_RE,
 )
 from bot_log_parser import ParsedExecution, parse_bot_log_file
+
+from core.observability.files import write_json_file, write_text_file
 
 DEFAULT_MIN_INTENT_TO_COMMAND = 0.6
 DEFAULT_MIN_PARSE_SUCCESS = 0.8
@@ -1137,11 +1147,13 @@ def render_markdown(data: dict[str, Any]) -> str:
 
 
 def write_artifacts(run_dir: Path, data: dict[str, Any]) -> None:
-    (run_dir / "action-reliability.json").write_text(
-        json.dumps(data, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
+    write_json_file(
+        run_dir / "action-reliability.json",
+        data,
+        sort_keys=True,
+        trailing_newline=True,
     )
-    (run_dir / "action-reliability.md").write_text(render_markdown(data), encoding="utf-8")
+    write_text_file(run_dir / "action-reliability.md", render_markdown(data))
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:

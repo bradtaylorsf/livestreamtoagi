@@ -13,6 +13,7 @@ Assembles the complete context window using a three-layer prompt architecture:
 from __future__ import annotations
 
 import dataclasses
+import json
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -458,6 +459,11 @@ class ContextAssembler:
         kept.reverse()
         return kept
 
+    @staticmethod
+    def _decode_redis_json(raw: str | bytes) -> dict[str, Any]:
+        data = json.loads(raw if isinstance(raw, str) else raw.decode("utf-8"))
+        return data if isinstance(data, dict) else {}
+
     async def _get_world_state(self, agent_id: str) -> str:
         """Get world state summary from Redis for the agent."""
         if not self._redis:
@@ -504,9 +510,7 @@ class ContextAssembler:
             raw = await self._redis.get(f"agent:needs:{agent_id}")
             if not raw:
                 return ""
-            import json as _json
-
-            data = _json.loads(raw if isinstance(raw, str) else raw.decode("utf-8"))
+            data = self._decode_redis_json(raw)
         except Exception:
             return ""
 
@@ -535,10 +539,8 @@ class ContextAssembler:
         if not recent:
             return ""
         try:
-            import json as _json
-
             raw = recent[-1]
-            data = _json.loads(raw if isinstance(raw, str) else raw.decode("utf-8"))
+            data = self._decode_redis_json(raw)
         except Exception:
             return ""
         event_name = data.get("event")

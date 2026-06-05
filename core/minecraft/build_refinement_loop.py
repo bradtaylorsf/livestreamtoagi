@@ -13,7 +13,6 @@ Pipeline per iteration:
 
 from __future__ import annotations
 
-import json
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -37,6 +36,7 @@ from core.minecraft.refinement_feedback import (
     RefinementFeedback,
     VisionComparisonProvider,
 )
+from core.observability.files import write_json_file, write_text_file
 
 logger = logging.getLogger(__name__)
 
@@ -189,7 +189,7 @@ class RefinementLoop:
         # 1) Source image — generate or fetch from cache.
         image_bytes, prompt, cache_hit = await self._generator.generate(intent)
         (intent_folder / "source_image.png").write_bytes(image_bytes)
-        (intent_folder / "image_prompt.txt").write_text(prompt, encoding="utf-8")
+        write_text_file(intent_folder / "image_prompt.txt", prompt)
 
         accumulated_cost = Decimal("0") if cache_hit else self._generator.cost_per_call
         self._log_iteration_event(
@@ -220,12 +220,9 @@ class RefinementLoop:
 
             # Persist current plan + script.
             plan_path = decompositions_dir / f"iter_{n}.buildplan.json"
-            plan_path.write_text(plan.model_dump_json(indent=2), encoding="utf-8")
+            write_text_file(plan_path, plan.model_dump_json(indent=2))
             script_path = scripts_dir / f"iter_{n}.script.json"
-            script_path.write_text(
-                json.dumps(script.to_jsonable(), sort_keys=True, indent=2),
-                encoding="utf-8",
-            )
+            write_json_file(script_path, script.to_jsonable(), sort_keys=True)
 
             # 4) Build + screenshot.
             try:
@@ -249,7 +246,7 @@ class RefinementLoop:
             )
             last_feedback = feedback
             feedback_path = feedback_dir / f"iter_{n}.json"
-            feedback_path.write_text(feedback.model_dump_json(indent=2), encoding="utf-8")
+            write_text_file(feedback_path, feedback.model_dump_json(indent=2))
 
             iter_cost = self._comparison.cost_per_call
             accumulated_cost += iter_cost
@@ -306,10 +303,7 @@ class RefinementLoop:
             accumulated_cost=accumulated_cost,
             last_feedback=last_feedback,
         )
-        (intent_folder / "final_summary.json").write_text(
-            json.dumps(summary, indent=2, sort_keys=True, default=str),
-            encoding="utf-8",
-        )
+        write_json_file(intent_folder / "final_summary.json", summary, sort_keys=True)
         return summary
 
     # ─── helpers ───────────────────────────────────────────────────

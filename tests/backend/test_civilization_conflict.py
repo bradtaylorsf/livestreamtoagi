@@ -23,11 +23,7 @@ from core.eval.settlement_smoke_signals import classify_sim_folder
 from core.models import FactionConfig
 from core.simulation.decision_log_schema import (
     ConflictEventRow,
-    DecisionLogRow,
-    DiplomacyEventRow,
     OwnershipDeltaRow,
-    RelationshipDeltaRow,
-    TradeEventRow,
 )
 from core.simulation.decision_logger import DecisionLogger, DecisionLogReader
 from tools.civilization import (
@@ -202,7 +198,7 @@ def test_judgement_favors_more_supported_evidence(tmp_path: Path) -> None:
     trade = TradeLedger(tmp_path)
     # Seed inventory + a trade so trade ref_ids exist.
     trade.set_inventory("rex", "cobblestone", 8)
-    offer = trade.propose(
+    trade.propose(
         proposer_id="vera",
         recipient_id="rex",
         give={"wood": 0},  # empty trade triggers failure

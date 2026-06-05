@@ -19,7 +19,6 @@ from core.simulation.embodiment import (
 from core.tool_executor import build_agent_tools
 from tools.build_tools import ProposeBuildTool
 
-
 # ─── Tool registry surface ────────────────────────────────────────
 
 

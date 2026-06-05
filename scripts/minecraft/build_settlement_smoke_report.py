@@ -14,7 +14,6 @@ Exits with a non-zero code when the outcome class is one of ``idle_chat``,
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
@@ -26,6 +25,7 @@ from core.eval.settlement_smoke_signals import (  # noqa: E402
     SettlementSmokeOutcome,
     classify_sim_folder,
 )
+from core.observability.files import write_json_file, write_text_file  # noqa: E402
 
 GATING_CLASSIFICATIONS = {"idle_chat", "scattered", "command_loop_churn"}
 
@@ -129,14 +129,12 @@ def main(argv: list[str] | None = None) -> int:
 
     outcome = classify_sim_folder(sim_folder)
 
-    (sim_folder / "smoke-report.json").write_text(
-        json.dumps(outcome.to_dict(), indent=2, default=str) + "\n",
-        encoding="utf-8",
+    write_json_file(
+        sim_folder / "smoke-report.json",
+        outcome.to_dict(),
+        trailing_newline=True,
     )
-    (sim_folder / "smoke-report.md").write_text(
-        _build_markdown(outcome, sim_folder),
-        encoding="utf-8",
-    )
+    write_text_file(sim_folder / "smoke-report.md", _build_markdown(outcome, sim_folder))
 
     print(f"settlement smoke: classification={outcome.classification}")
     print(outcome.summary)

@@ -22,19 +22,20 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import logging
 import os
 import random
 import signal
 import sys
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+from core.simulation.artifacts import build_sim_artifact_folder, write_metadata  # noqa: E402
 
 
 def _default_agents() -> list[str]:
@@ -80,17 +81,6 @@ def _resolve_scenario(scenario_arg: str) -> Path:
     raise FileNotFoundError(f"scenario not found: {scenario_arg}")
 
 
-def _build_output_folder(output_dir: Path, name: str) -> Path:
-    timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
-    folder = output_dir / f"{timestamp}_{name}"
-    folder.mkdir(parents=True, exist_ok=True)
-    return folder
-
-
-def _write_metadata(sim_folder: Path, payload: dict) -> None:
-    (sim_folder / "metadata.json").write_text(json.dumps(payload, indent=2, default=str))
-
-
 async def run_headless(args: argparse.Namespace) -> None:
     logging.basicConfig(
         level=logging.INFO if args.verbose else logging.WARNING,
@@ -107,7 +97,7 @@ async def run_headless(args: argparse.Namespace) -> None:
     name = args.name or f"headless-{scenario_path.stem}-{uuid.uuid4().hex[:6]}"
 
     output_dir = Path(args.output_dir).expanduser().resolve()
-    sim_folder = _build_output_folder(output_dir, name)
+    sim_folder = build_sim_artifact_folder(output_dir, name)
 
     # Set log destination via env so downstream pieces (decision logger) can
     # discover it without threading the path through every constructor.
@@ -162,10 +152,10 @@ async def run_headless(args: argparse.Namespace) -> None:
         "max_cost": args.max_cost,
         "speed_multiplier": args.speed_multiplier,
         "duration_seconds": duration.total_seconds() if duration else None,
-        "started_at": datetime.utcnow().isoformat() + "Z",
+        "started_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "agents": scenario_agents,
     }
-    _write_metadata(sim_folder, metadata)
+    write_metadata(sim_folder, metadata)
 
     svc = await bootstrap_services(auto_migrate=True)
     cfg = svc.config_loader.config
@@ -307,11 +297,11 @@ async def run_headless(args: argparse.Namespace) -> None:
             orchestrator._decision_logger.close()
         except Exception:  # pragma: no cover
             pass
-        metadata["completed_at"] = datetime.utcnow().isoformat() + "Z"
+        metadata["completed_at"] = datetime.now(UTC).isoformat().replace("+00:00", "Z")
         metadata["simulation_id"] = (
             str(orchestrator.simulation_id) if orchestrator.simulation_id else None
         )
-        _write_metadata(sim_folder, metadata)
+        write_metadata(sim_folder, metadata)
 
         if not args.skip_eval:
             try:

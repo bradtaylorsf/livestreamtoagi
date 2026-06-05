@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -15,6 +15,8 @@ from core.minecraft.eval.live_telemetry import (
     OutcomeClass,
     classify_timing_failure,
 )
+from core.observability.files import write_json_file, write_text_file
+from core.observability.jsonl import write_jsonl
 
 LIVE_GENERATIONS = "live-generations.ndjson"
 LIVE_ACTIONS = "live-actions.ndjson"
@@ -75,15 +77,30 @@ def write_live_eval_artifacts(
     paths["live_report"] = target_dir / LIVE_REPORT
     paths["report"] = target_dir / "report.md"
 
-    _write_json(paths["summary"], summary.to_dict())
-    _write_ndjson(paths["cases"], (result.to_dict() for result in summary.case_results))
-    _write_ndjson(paths["live_actions"], live_action_records(summary))
-    _write_json(paths["live_scores"], live_scores_dict(summary))
-    _write_ndjson(
+    write_json_file(
+        paths["summary"],
+        summary.to_dict(),
+        sort_keys=True,
+        trailing_newline=True,
+    )
+    write_jsonl(
+        paths["cases"],
+        (result.to_dict() for result in summary.case_results),
+        sort_keys=True,
+    )
+    write_jsonl(paths["live_actions"], live_action_records(summary), sort_keys=True)
+    write_json_file(
+        paths["live_scores"],
+        live_scores_dict(summary),
+        sort_keys=True,
+        trailing_newline=True,
+    )
+    write_jsonl(
         paths["live_generations"],
         live_generation_records(summary, dataset_path=dataset_path),
+        sort_keys=True,
     )
-    _write_ndjson(paths["timeline"], live_timeline_records(summary))
+    write_jsonl(paths["timeline"], live_timeline_records(summary), sort_keys=True)
 
     trace_links: list[dict[str, str]] = []
     if traces is not None:
@@ -92,8 +109,8 @@ def write_live_eval_artifacts(
         paths["traces"] = traces_dir
 
     report_text = live_report_md(summary, trace_links=trace_links)
-    paths["live_report"].write_text(report_text, encoding="utf-8")
-    paths["report"].write_text(report_text, encoding="utf-8")
+    write_text_file(paths["live_report"], report_text)
+    write_text_file(paths["report"], report_text)
     return paths
 
 
@@ -218,7 +235,7 @@ def write_position_traces(
         if trace is None:
             continue
         path = target_dir / f"{_safe_filename(result.case_id)}.json"
-        _write_json(path, trace)
+        write_json_file(path, trace, sort_keys=True, trailing_newline=True)
         links.append(
             {
                 "case_id": result.case_id,
@@ -465,17 +482,6 @@ def _relative_link(path: Path, base_dir: Path) -> str:
 def _safe_filename(value: str) -> str:
     safe = "".join(char if char.isalnum() or char in "._-" else "-" for char in value)
     return safe or "case"
-
-
-def _write_json(path: Path, data: Mapping[str, Any]) -> None:
-    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
-
-def _write_ndjson(path: Path, records: Iterable[Mapping[str, Any]]) -> None:
-    path.write_text(
-        "".join(json.dumps(dict(record), sort_keys=True) + "\n" for record in records),
-        encoding="utf-8",
-    )
 
 
 def _isoformat_ms(ts_ms: int) -> str:

@@ -24,9 +24,14 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 STATE = ROOT / "docs" / ".mc-pivot-issues.json"
 PLAN = "docs/MINECRAFT-PIVOT-ISSUE-PLAN.md"
 SLEEP = 2.0  # be polite to GitHub's secondary rate limiter
+
+from core.observability.files import write_json_file  # noqa: E402
 
 LABELS = [
     ("minecraft", "1d7c2f", "Touches Minecraft/Mindcraft/Mineflayer"),
@@ -894,7 +899,7 @@ def load_state() -> dict:
 
 
 def save_state(s: dict) -> None:
-    STATE.write_text(json.dumps(s, indent=2))
+    write_json_file(STATE, s)
 
 
 def ensure_labels() -> None:

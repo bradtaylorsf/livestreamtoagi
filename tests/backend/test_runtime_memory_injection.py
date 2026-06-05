@@ -63,6 +63,7 @@ class RuntimeRecallMemory:
 class RuntimeServices:
     core_memory: RuntimeCoreMemory
     recall_memory: RuntimeRecallMemory
+    memory_backend: RuntimeRecallMemory | None = None
 
 
 @pytest.fixture
@@ -200,6 +201,64 @@ def test_runtime_memory_recall_is_scoped_and_logs_no_content(
     )
     assert "never log this seeded core phrase" not in caplog.text
     assert "Rex hid torches" not in caplog.text
+
+
+def test_core_memory_tier_does_not_touch_recall_backend(token_env: str) -> None:
+    simulation_id = uuid.uuid4()
+    services = RuntimeServices(
+        core_memory=RuntimeCoreMemory(rows={("vera", simulation_id): "Vera core memory"}),
+        recall_memory=RuntimeRecallMemory(
+            rows={("vera", simulation_id): ["Recall should not be queried."]}
+        ),
+    )
+    client = _client(services)
+
+    response = _send_memory_request(
+        client,
+        _memory_request(
+            agent_id="vera",
+            simulation_id=simulation_id,
+            tier="core",
+            query="ignored for core",
+        ),
+    )
+
+    payload = c.validate_response(response, service="memory", method="recall")
+    assert isinstance(payload, c.MemoryRecallResponse)
+    assert payload.core_memory == "Vera core memory"
+    assert services.recall_memory.calls == []
+
+
+def test_recall_tier_uses_configured_memory_backend_adapter(token_env: str) -> None:
+    simulation_id = uuid.uuid4()
+    fallback_recall = RuntimeRecallMemory(
+        rows={("vera", simulation_id): ["Fallback recall should not be used."]}
+    )
+    backend = RuntimeRecallMemory(
+        rows={("vera", simulation_id): ["Backend adapter recall is the source."]}
+    )
+    services = RuntimeServices(
+        core_memory=RuntimeCoreMemory(),
+        recall_memory=fallback_recall,
+        memory_backend=backend,
+    )
+    client = _client(services)
+
+    response = _send_memory_request(
+        client,
+        _memory_request(
+            agent_id="vera",
+            simulation_id=simulation_id,
+            tier="recall",
+            query="starter base",
+        ),
+    )
+
+    payload = c.validate_response(response, service="memory", method="recall")
+    assert isinstance(payload, c.MemoryRecallResponse)
+    assert "Backend adapter recall" in (payload.formatted or "")
+    assert backend.calls[-1] == ("vera", "starter base", 3, simulation_id)
+    assert fallback_recall.calls == []
 
 
 def _stage_node_runtime(tmp_path: Path) -> Path:

@@ -23,6 +23,12 @@ from core.models import (
     SimulationCostResponse,
     TimelineEvent,
 )
+from core.observability.files import write_json_file
+from core.simulation.launch import (
+    build_headless_simulation_command,
+    build_run_simulation_command,
+    launch_detached,
+)
 
 if TYPE_CHECKING:
     from fastapi.responses import RedirectResponse
@@ -147,9 +153,6 @@ async def create_simulation(
       * otherwise → run scripts/watch_conversations.py in test mode
         (legacy admin path).
     """
-    import subprocess
-    import sys
-
     from core.repos.simulation_repo import SimulationRepo
 
     sim_repo = SimulationRepo(db)
@@ -190,26 +193,14 @@ async def create_simulation(
             )
         )
 
-        cmd = [
-            sys.executable,
-            str(project_root / "scripts" / "run_simulation.py"),
-            "--name",
-            sim_name,
-            "--seed-file",
-            str(candidate),
-            "--max-cost",
-            str(max_cost),
-            "--sim-id",
-            str(sim.id),
-        ]
-
-        subprocess.Popen(  # noqa: S603
-            cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-            cwd=str(project_root),
+        cmd = build_run_simulation_command(
+            project_root=project_root,
+            name=sim_name,
+            seed_file=candidate,
+            max_cost=max_cost,
+            sim_id=sim.id,
         )
+        launch_detached(cmd, cwd=project_root)
 
         return NewSimulationResponse(
             simulation_id=str(sim.id),
@@ -242,6 +233,8 @@ async def create_simulation(
         )
     )
 
+    import sys
+
     cmd = [
         sys.executable,
         str(project_root / "scripts" / "watch_conversations.py"),
@@ -260,12 +253,7 @@ async def create_simulation(
     if body.management_shadow:
         cmd.append("--management-shadow")
 
-    subprocess.Popen(  # noqa: S603
-        cmd,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
+    launch_detached(cmd, cwd=project_root)
 
     return NewSimulationResponse(
         simulation_id=str(sim.id),
@@ -285,9 +273,6 @@ async def create_headless_simulation(
     by ID immediately; threads the row UUID into the subprocess via
     ``--sim-id`` so the orchestrator inserts under the same ID.
     """
-    import subprocess
-    import sys
-
     from core.models import SimulationCreate
     from core.repos.simulation_repo import SimulationRepo
 
@@ -321,28 +306,15 @@ async def create_headless_simulation(
         )
     )
 
-    cmd = [
-        sys.executable,
-        str(project_root / "scripts" / "run_headless_sim.py"),
-        "--scenario",
-        str(candidate),
-        "--name",
-        sim_name,
-        "--max-cost",
-        str(max_cost),
-        "--sim-id",
-        str(sim.id),
-    ]
-    if body.seed is not None:
-        cmd += ["--seed", str(body.seed)]
-
-    subprocess.Popen(  # noqa: S603
-        cmd,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-        cwd=str(project_root),
+    cmd = build_headless_simulation_command(
+        project_root=project_root,
+        scenario=candidate,
+        name=sim_name,
+        max_cost=max_cost,
+        sim_id=sim.id,
+        seed=body.seed,
     )
+    launch_detached(cmd, cwd=project_root)
 
     return HeadlessRunResponse(
         simulation_id=str(sim.id),
@@ -611,7 +583,6 @@ async def export_simulation_snapshot(
     db: Database = Depends(get_db),
 ) -> SnapshotExportResponse:
     """Export a complete simulation snapshot (full state) to JSON."""
-    import json as _json
     import re
     from pathlib import Path
 
@@ -631,7 +602,7 @@ async def export_simulation_snapshot(
     safe_name = re.sub(r"[^\w\-]", "_", source.name)
     filename = f"full-{safe_name}-{_time_str()}.json"
     filepath = snapshots_dir / filename
-    filepath.write_text(_json.dumps(snapshot_data, indent=2, default=str))
+    write_json_file(filepath, snapshot_data)
 
     return SnapshotExportResponse(
         simulation_id=str(sim_id),
@@ -886,7 +857,6 @@ async def create_snapshot(
 
     DEPRECATED: Use POST /simulations/{sim_id}/snapshot/export instead.
     """
-    import json
     from pathlib import Path
 
     from core.memory.snapshot import MemorySnapshotExporter
@@ -907,7 +877,7 @@ async def create_snapshot(
     timestamp = snapshot_data.get("snapshot_at", "unknown").replace(":", "-").replace("+", "")[:19]
     filename = f"snapshot-{str(sim_id)[:8]}-{timestamp}.json"
     filepath = snapshots_dir / filename
-    filepath.write_text(json.dumps(snapshot_data, indent=2, default=str))
+    write_json_file(filepath, snapshot_data)
 
     return {
         "filename": filename,

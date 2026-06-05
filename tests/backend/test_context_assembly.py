@@ -2,22 +2,17 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from core.context_assembly import (
     BUFFER_MIN_MESSAGES,
-    CHAT_HIGHLIGHTS_BUDGET,
-    MAX_BUDGET,
     PIXEL_AGENT_ID,
-    PROMPT_HINTS,
-    TYPICAL_BUDGET,
     ContextAssembler,
 )
-from core.system_prompt import INFRASTRUCTURE_PROMPT
 from core.models import AgentConfig, Transcript
-
 
 # ── Helpers ───────────────────────────────────────────────────────
 
@@ -111,6 +106,7 @@ def mock_redis() -> AsyncMock:
         return data.get(key)
 
     redis.get = AsyncMock(side_effect=get_side_effect)
+    redis.lrange = AsyncMock(return_value=[])
     return redis
 
 
@@ -541,6 +537,45 @@ class TestWorldState:
         messages = (await assembler.assemble_context("rex", [])).messages
         system = messages[0]["content"]
         assert "World State" not in system
+
+    @pytest.mark.asyncio
+    async def test_world_state_includes_needs_from_redis_json(
+        self, assembler: ContextAssembler, mock_redis: AsyncMock
+    ) -> None:
+        async def get_side_effect(key: str) -> bytes | str | None:
+            data = {
+                "agent:location:rex": "The Workshop",
+                "agent:needs:rex": json.dumps(
+                    {
+                        "below_critical": {"hunger": 12},
+                        "below_warning": {"energy": 35},
+                        "hunger": 12,
+                        "energy": 35,
+                    }
+                ).encode("utf-8"),
+            }
+            return data.get(key)
+
+        mock_redis.get = AsyncMock(side_effect=get_side_effect)
+        messages = (await assembler.assemble_context("rex", [])).messages
+        system = messages[0]["content"]
+
+        assert "Active needs:" in system
+        assert "hunger: CRITICAL (12/100)" in system
+        assert "energy: low (35/100)" in system
+
+    @pytest.mark.asyncio
+    async def test_world_state_includes_recent_world_event(
+        self, assembler: ContextAssembler, mock_redis: AsyncMock
+    ) -> None:
+        mock_redis.lrange = AsyncMock(
+            return_value=[json.dumps({"event": "rain_started"}).encode("utf-8")]
+        )
+
+        messages = (await assembler.assemble_context("rex", [])).messages
+        system = messages[0]["content"]
+
+        assert "Recent world event: rain_started" in system
 
 
 # ── Transcript injection tests ───────────────────────────────────

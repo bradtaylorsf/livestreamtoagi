@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import json
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
@@ -13,6 +12,8 @@ from core.minecraft.commands import CommandSchema, CommandSchemaSet
 from core.minecraft.eval.evaluator import EvalOutcome, EvalReport, evaluate_response
 from core.minecraft.eval.runner import RunSummary, ScenarioRunResult
 from core.minecraft.scenarios import Scenario, ScenarioSet
+from core.observability.files import write_json_file, write_text_file
+from core.observability.jsonl import write_jsonl
 
 OUTCOME_COUNT_KEYS: tuple[str, ...] = (
     "malformed",
@@ -99,38 +100,48 @@ def score_run(
 def write_generations_ndjson(path: str | Path, scored_run: ScoredRun) -> None:
     """Write one JSON line per model generation with parse and score metadata."""
 
-    _write_ndjson(path, (_generation_record(item) for item in scored_run.scenarios))
+    write_jsonl(
+        path,
+        (_generation_record(item) for item in scored_run.scenarios),
+        sort_keys=True,
+    )
 
 
 def write_scores_json(path: str | Path, scored_run: ScoredRun) -> None:
     """Write deterministic aggregate and per-scenario scores."""
 
-    _write_json(path, scores_json_dict(scored_run))
+    write_json_file(
+        path,
+        scores_json_dict(scored_run),
+        sort_keys=True,
+        trailing_newline=True,
+    )
 
 
 def write_report_md(path: str | Path, scored_run: ScoredRun) -> None:
     """Write a human-readable markdown report for one scored run."""
 
-    _write_text(path, report_md_text(scored_run))
+    write_text_file(path, report_md_text(scored_run))
 
 
 def write_passing_prompts_ndjson(path: str | Path, scored_run: ScoredRun) -> None:
     """Write accepted command prompts suitable for promotion into live smoke jobs."""
 
-    _write_ndjson(
+    write_jsonl(
         path,
         (
             _passing_prompt_record(item)
             for item in _sorted_scenarios(scored_run)
             if _outcome_key(item) == "accepted_command"
         ),
+        sort_keys=True,
     )
 
 
 def write_comparison_md(path: str | Path, scored_runs: Sequence[ScoredRun]) -> None:
     """Write a markdown comparison table for provider/model scored runs."""
 
-    _write_text(path, comparison_md_text(scored_runs))
+    write_text_file(path, comparison_md_text(scored_runs))
 
 
 def scores_json_dict(scored_run: ScoredRun) -> dict[str, Any]:
@@ -377,21 +388,6 @@ def _format_bool(value: bool | None) -> str:
     if value is None:
         return "unknown"
     return str(value).lower()
-
-
-def _write_ndjson(path: str | Path, records: Iterable[Mapping[str, Any]]) -> None:
-    text = "".join(json.dumps(record, sort_keys=True) + "\n" for record in records)
-    _write_text(path, text)
-
-
-def _write_json(path: str | Path, payload: Mapping[str, Any]) -> None:
-    _write_text(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
-
-
-def _write_text(path: str | Path, text: str) -> None:
-    resolved = Path(path)
-    resolved.parent.mkdir(parents=True, exist_ok=True)
-    resolved.write_text(text, encoding="utf-8")
 
 
 def _mapping(value: Any) -> Mapping[str, Any]:
