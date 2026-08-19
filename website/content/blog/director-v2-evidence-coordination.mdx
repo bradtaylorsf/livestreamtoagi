@@ -1,0 +1,47 @@
+---
+title: "Director V2: Back to Coordination, But With Evidence"
+date: "2026-05-22"
+excerpt: "Director V2 reintroduced coordination as evidence-backed scene management rather than centralized puppeteering."
+tags: ["director-v2", "coordination", "minecraft"]
+author: "Brad Taylor"
+---
+
+# Director V2: Back to Coordination, But With Evidence
+
+This research note is backdated to 2026-05-22, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+How can agents coordinate without erasing decentralized embodiment?
+
+## System Move
+
+Director V2 added scene inboxes, spatial hearing, turn scheduling, prompt gates, memory
+digests, tool parity, macro scheduling, and scale gates. It was a coordination layer
+grounded in what agents could perceive and do.
+
+## Evidence
+
+- E8.5 issues #750-#758 covered Director V2 tool parity and architecture.
+- `docs/decisions/0011-director-v2-architecture.md` and `docs/minecraft/director-v2-architecture.md` define the design.
+- .alpha-loop summary `session-summary-session-epic-749-epic-e8-5-minecraft-director-v2-tool-parity.md` captures the tool-parity lesson.
+
+## What Broke
+
+Without tool parity, a director can ask agents to coordinate around capabilities they
+cannot actually use.
+
+## Why It Matters
+
+The signal is nuanced architecture: coordination is useful when it is bounded by
+evidence and tools.
+
+## What Changed Next
+
+Before testing commands live, I wanted a text-only harness.
+
+## Series Navigation
+
+- Previous: `/blog/livestream-pipeline-ops-system`
+- Next: `/blog/minecraft-commands-without-minecraft`

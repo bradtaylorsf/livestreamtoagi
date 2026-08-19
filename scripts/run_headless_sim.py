@@ -95,6 +95,12 @@ async def run_headless(args: argparse.Namespace) -> None:
 
     scenario_path = _resolve_scenario(args.scenario)
     name = args.name or f"headless-{scenario_path.stem}-{uuid.uuid4().hex[:6]}"
+    collaborative_build_mode = args.collaborative_build_mode
+    if collaborative_build_mode == "env":
+        collaborative_build_mode = os.environ.get("MC_SIM_COLLABORATIVE_BUILD_MODE", "off")
+    collaborative_build_mode = collaborative_build_mode.strip().lower()
+    if collaborative_build_mode != "off":
+        os.environ["MC_SIM_COLLABORATIVE_BUILD_MODE"] = collaborative_build_mode
 
     output_dir = Path(args.output_dir).expanduser().resolve()
     sim_folder = build_sim_artifact_folder(output_dir, name)
@@ -154,6 +160,7 @@ async def run_headless(args: argparse.Namespace) -> None:
         "duration_seconds": duration.total_seconds() if duration else None,
         "started_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "agents": scenario_agents,
+        "collaborative_build_mode": collaborative_build_mode,
     }
     write_metadata(sim_folder, metadata)
 
@@ -366,6 +373,15 @@ def _build_parser() -> argparse.ArgumentParser:
         "--skip-eval",
         action="store_true",
         help="Skip post-run headless eval scoring (decision log still written).",
+    )
+    parser.add_argument(
+        "--collaborative-build-mode",
+        choices=("env", "off", "roles"),
+        default="env",
+        help=(
+            "Write role-based collaborative build artifacts for compiled BuildScripts. "
+            "Use 'roles' to split each build into manager/gatherer/crafter/builder jobs."
+        ),
     )
     parser.add_argument(
         "--sim-id",

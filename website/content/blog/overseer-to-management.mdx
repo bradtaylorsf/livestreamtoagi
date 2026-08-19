@@ -1,0 +1,48 @@
+---
+title: "From Overseer to Management"
+date: "2026-04-04"
+excerpt: "Renaming Overseer to Management clarified that safety authority is a system role, not another fictional character."
+tags: ["safety", "product-design", "agent-systems"]
+author: "Brad Taylor"
+---
+
+# From Overseer to Management
+
+This research note is backdated to 2026-04-04, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+What should the safety role be called and how much should it intervene?
+
+## System Move
+
+I renamed Overseer to Management, relaxed filtering, and fixed continuity issues. The
+rename mattered because it moved the role out of the fiction and into operational
+authority.
+
+## Evidence
+
+- Issues #220-#221 tracked the rename and filter tuning.
+- Commits `a6da3ea0`, `ee86e555`, and `f8f5e2e4` updated code, tests, and CLI scripts.
+- `core/management.py` is the safety role that must remain in the output path.
+
+## What Broke
+
+If Management is too aggressive, it suppresses the social dynamics the experiment is
+trying to observe.
+
+## Why It Matters
+
+The signal is product judgment: naming, authority, and filter posture shape both safety
+and research validity.
+
+## What Changed Next
+
+After the filter was clearer, I tried the first version of an automated improvement
+loop.
+
+## Series Navigation
+
+- Previous: `/blog/llm-judge-social-systems`
+- Next: `/blog/first-evolution-loop`

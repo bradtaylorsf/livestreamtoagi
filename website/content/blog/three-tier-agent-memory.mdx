@@ -1,0 +1,49 @@
+---
+title: "A Three-Tier Memory System for Persistent Agents"
+date: "2026-04-02"
+excerpt: "Persistent agents needed separate memory tiers for identity, semantic recall, and permanent transcripts."
+tags: ["memory", "pgvector", "agent-identity"]
+author: "Brad Taylor"
+---
+
+# A Three-Tier Memory System for Persistent Agents
+
+This research note is backdated to 2026-04-02, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+What should count as memory when agents are expected to persist beyond a single
+conversation?
+
+## System Move
+
+I split memory into core, recall, and archival tiers. Core memory stays in prompt as
+identity. Recall memory uses vector search for relevant retrieval. Archival memory
+preserves transcripts rather than pretending summaries are enough.
+
+## Evidence
+
+- Issues #16-#21 covered core, recall, archival, compaction, reflection, and context assembly.
+- Commits `f927cb20`, `9f29d511`, `a329853c`, `5f3a1584`, `95f6131a`, and `c58ddcdd` landed the memory stack.
+- `specs/MEMORY-SYSTEM.md` and `core/memory/` define the tier boundaries.
+
+## What Broke
+
+Each tier introduced a different failure mode: stale core facts, bad retrieval, lossy
+compaction, or transcript bloat.
+
+## Why It Matters
+
+The signal is boundary design: long-running identity needs storage contracts, not just
+longer prompts.
+
+## What Changed Next
+
+Memory only matters when it enters the model at the right moment, so the next control
+surface was context assembly.
+
+## Series Navigation
+
+- Previous: `/blog/agents-as-experimental-variables`
+- Next: `/blog/context-assembly-control-surface`

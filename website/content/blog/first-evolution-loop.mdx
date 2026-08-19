@@ -1,0 +1,48 @@
+---
+title: "The First Evolution Loop"
+date: "2026-04-05"
+excerpt: "The first evolution loop was research operations, not magic self-improvement."
+tags: ["self-improvement", "evals", "automation"]
+author: "Brad Taylor"
+---
+
+# The First Evolution Loop
+
+This research note is backdated to 2026-04-05, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+Can the system close a loop from simulation results to targeted changes without losing
+traceability?
+
+## System Move
+
+I added versioned agent configs, intrinsic drives, an agency eval dimension, an eval
+analyzer, and a simulate -> evaluate -> improve orchestrator. The aim was to classify
+findings and make improvement proposals auditable.
+
+## Evidence
+
+- Issues #238-#242 covered versioned configs, drives, agency evals, analyzer, and loop orchestration.
+- Commits `ec57d908`, `8e2178db`, `c76b6c5c`, `c809620a`, `e750a29b`, and `3595e6ba` landed the loop.
+- `core/simulation/` and the eval analyzer paths connect runs to improvement suggestions.
+
+## What Broke
+
+A loop can optimize toward weak measurements if the evaluator is treated as truth rather
+than an instrument.
+
+## Why It Matters
+
+The signal is disciplined automation: improvement proposals need versioning and
+evidence, not hype.
+
+## What Changed Next
+
+The next failure was deeper than prompts: agents were reactive by default.
+
+## Series Navigation
+
+- Previous: `/blog/overseer-to-management`
+- Next: `/blog/reactive-to-proactive-agents`

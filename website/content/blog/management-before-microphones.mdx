@@ -1,0 +1,46 @@
+---
+title: "Management Before Microphones"
+date: "2026-04-03"
+excerpt: "The Management filter and TTS path had to exist before any agent voice reached a public stream."
+tags: ["safety", "tts", "content-filtering"]
+author: "Brad Taylor"
+---
+
+# Management Before Microphones
+
+This research note is backdated to 2026-04-03, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+What should sit between an LLM utterance and broadcast audio?
+
+## System Move
+
+The system introduced a Management content filter and Edge TTS voice path before public
+output. I wanted a producer-like safety role with a delay window rather than raw model
+text flowing straight to speech.
+
+## Evidence
+
+- Issues #31, #33, and #143 covered Management, TTS, and structured dialogue/action parsing.
+- Commits `40a4ac0b`, `c5aa3878`, and `5b8b433c` landed the filter, voices, and parsing path.
+- `core/management.py`, `core/tts`, and `tools/` show where output becomes action or speech.
+
+## What Broke
+
+The first filter posture was too blunt for a social system. Safety needs authority, but
+excessive filtering can flatten the behavior being studied.
+
+## Why It Matters
+
+The signal is operational safety: live output gets a gate before it gets a microphone.
+
+## What Changed Next
+
+Once agents could speak safely, the next question was whether they could act.
+
+## Series Navigation
+
+- Previous: `/blog/first-conversation-engine`
+- Next: `/blog/tools-turn-characters-into-agents`

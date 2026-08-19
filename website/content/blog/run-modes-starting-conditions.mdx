@@ -1,0 +1,47 @@
+---
+title: "Run Modes and Starting Conditions"
+date: "2026-05-25"
+excerpt: "Run modes made starting conditions explicit: personas, memory seeds, factions, goals, world inputs, and blackboards."
+tags: ["run-modes", "simulation", "minecraft"]
+author: "Brad Taylor"
+---
+
+# Run Modes and Starting Conditions
+
+This research note is backdated to 2026-05-25, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+How do I compare persistent worlds, blank-slate experiments, and scenario-driven runs?
+
+## System Move
+
+I added a RunSpec, personas, factions and goals, seeded versus blank memory, world
+inputs, persistent and experimental modes, shared blackboard mechanics, and
+distress/rescue loops.
+
+## Evidence
+
+- E12 issues #601-#608, #708-#713, and #775 covered run modes and starting conditions.
+- Commits `f6d37142`, `9715e971`, `21ad82dc`, `e971cebe`, `20ea55c4`, `c5c4d56b`, and `70fc4195` landed the system.
+- `docs/run-modes.md`, `docs/run-modes/blank-slate-embodied.md`, and the epic-514 alpha-loop summary define the modes.
+
+## What Broke
+
+If starting conditions are implicit, differences between runs become anecdotal rather
+than experimental.
+
+## Why It Matters
+
+The signal is experimental control over initial conditions.
+
+## What Changed Next
+
+Those modes made it easier to see a negative result: activity was not the same as
+collaboration.
+
+## Series Navigation
+
+- Previous: `/blog/embodied-eval-reporting`
+- Next: `/blog/negative-result-activity-not-collaboration`

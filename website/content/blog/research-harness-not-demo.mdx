@@ -1,0 +1,49 @@
+---
+title: "The Research Harness: Why a Livestreamed Agent World"
+date: "2026-03-30"
+excerpt: "The first commit framed Livestream to AGI as a research harness for persistent multi-agent behavior, not a polished demo."
+tags: ["research", "multi-agent", "vision"]
+author: "Brad Taylor"
+---
+
+# The Research Harness: Why a Livestreamed Agent World
+
+This research note is backdated to 2026-03-30, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+What kind of environment would make multi-agent failure visible enough to study instead
+of easy to hide?
+
+## System Move
+
+I started with a public, persistent world: named agents, a shared budget, a visible
+stream, and an architecture that could eventually connect conversation, memory, tools,
+and world state. The important move was not the branding. It was deciding that the
+system should expose its own failures.
+
+## Evidence
+
+- Commit `45e38268` initialized the project structure, specs, configs, and documentation.
+- `specs/ENGINEERING-SPECS.md` defined the backend, frontend, memory, TTS, cost, and safety shape.
+- `research/RESEARCH-PROGRAM-AND-CONTENT-STRATEGY.md` framed the project as a longitudinal research program.
+
+## What Broke
+
+The first commit proved almost nothing about agent capability. It only created a place
+where capability claims could later be tested.
+
+## Why It Matters
+
+The professional signal here is research framing: I wanted an instrument where memory,
+coordination, cost, and safety could be measured over time.
+
+## What Changed Next
+
+The next problem was less glamorous and more important: make the substrate reproducible
+enough that later behavior would not depend on my laptop being in a lucky state.
+
+## Series Navigation
+
+- Next: `/blog/reproducible-agent-infrastructure`

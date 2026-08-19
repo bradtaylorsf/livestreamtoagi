@@ -1,0 +1,47 @@
+---
+title: "Autonomy Needs a Kill Switch"
+date: "2026-05-21"
+excerpt: "Persistent autonomy needs hard caps, spend alerts, and kill paths that halt both bots and world loops."
+tags: ["safety", "cost-governance", "autonomy"]
+author: "Brad Taylor"
+---
+
+# Autonomy Needs a Kill Switch
+
+This research note is backdated to 2026-05-21, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+What safeguards are required before agents run continuously in a live world?
+
+## System Move
+
+I hardened per-simulation caps, per-agent hourly spend caps, phone-accessible kill
+switch paths, Node bot halt behavior, world-loop halt behavior, spend alerting, and
+regression gates.
+
+## Evidence
+
+- E11 issues #594-#600 covered cost and kill-switch hardening.
+- Commits `2dd70dc2`, `61078296`, `4a806ff9`, `c0ff268c`, `cc36eace`, and `ccac1382` landed the hardening work.
+- `docs/cost-kill-audit.md`, `docs/kill-switch-operator.md`, and the epic-513 alpha-loop summary document the gates.
+
+## What Broke
+
+Several failures were environmental or preflight failures rather than code failures,
+which is exactly why operator-facing checks matter.
+
+## Why It Matters
+
+The signal is safety engineering for autonomous systems with real spend and public
+output.
+
+## What Changed Next
+
+The streaming pipeline needed the same operational posture.
+
+## Series Navigation
+
+- Previous: `/blog/retiring-central-director`
+- Next: `/blog/livestream-pipeline-ops-system`

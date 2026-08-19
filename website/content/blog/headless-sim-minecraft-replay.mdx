@@ -1,0 +1,46 @@
+---
+title: "Headless Sims Meet Minecraft Replay"
+date: "2026-05-26"
+excerpt: "Headless simulation and Minecraft replay connected decisions, world events, and visual artifacts."
+tags: ["headless", "replay", "minecraft"]
+author: "Brad Taylor"
+---
+
+# Headless Sims Meet Minecraft Replay
+
+This research note is backdated to 2026-05-26, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+How can I run a scenario headlessly and still inspect the world evidence afterward?
+
+## System Move
+
+I added headless RunMode, an EmbodimentExecutor abstraction, decision-log JSONL schema,
+scenario eval targets, world-event scheduling, needs simulation, headless scoring,
+website integration, replay viewer paths, and artifacts.
+
+## Evidence
+
+- E22 issues #851-#861 covered the headless sim and Minecraft replay pipeline.
+- Commits `e00931d9`, `50713cb5`, `6bad5b36`, `e5836150`, `9f7ba740`, and `2ba1cf13` landed the pipeline.
+- `docs/MINECRAFT-REPLAY.md`, `core/simulation/decision_log_schema.py`, and the epic-850 alpha-loop summary document the system.
+
+## What Broke
+
+The E22 learning was blunt: unit-green features can be production no-ops when per-run
+services are not threaded into real construction sites.
+
+## Why It Matters
+
+The signal is integration realism: tests must cover the path users actually run.
+
+## What Changed Next
+
+The build path then needed a compiler from intent to Minecraft actions.
+
+## Series Navigation
+
+- Previous: `/blog/negative-result-activity-not-collaboration`
+- Next: `/blog/build-intent-to-build-script`

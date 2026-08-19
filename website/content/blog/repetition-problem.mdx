@@ -1,0 +1,49 @@
+---
+title: "The Repetition Problem"
+date: "2026-04-04"
+excerpt: "The first decisive negative result was repetition: the agents could talk without making durable progress."
+tags: ["negative-results", "evals", "agents"]
+author: "Brad Taylor"
+---
+
+# The Repetition Problem
+
+This research note is backdated to 2026-04-04, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+What happens when persistent agents have social machinery but not enough internal
+pressure to change?
+
+## System Move
+
+The eval quality work made repetition visible. The transcripts showed repeated topics,
+weak differentiation, identity bleed, missing speakers, and talk that did not reliably
+turn into action.
+
+## Evidence
+
+- Eval `eval-e24db48d-1e96-4630-9456-72cc8f22f221.json` is the anchor artifact for early repetition concerns.
+- Issues #213-#217 and #229-#236 tracked eval quality and repetition fixes.
+- Commits `ef609af0` and `9dfc28b2` landed the first eval-quality fix session and completion.
+
+## What Broke
+
+The system could produce conversation that looked active while remaining behaviorally
+stuck.
+
+## Why It Matters
+
+The signal is candor: the research notebook should publish negative results when they
+are the actual finding.
+
+## What Changed Next
+
+Once repetition was measurable, the next question was how to judge social systems
+without pretending the judge is perfect.
+
+## Series Navigation
+
+- Previous: `/blog/qa-as-research-method`
+- Next: `/blog/llm-judge-social-systems`

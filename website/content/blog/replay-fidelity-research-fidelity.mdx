@@ -1,0 +1,46 @@
+---
+title: "Replay Fidelity Is Research Fidelity"
+date: "2026-05-09"
+excerpt: "Replay fidelity became research fidelity because bad replay means bad evidence."
+tags: ["replay", "video", "evidence"]
+author: "Brad Taylor"
+---
+
+# Replay Fidelity Is Research Fidelity
+
+This research note is backdated to 2026-05-09, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+Can I trust a rendered artifact if it does not match the actual simulation?
+
+## System Move
+
+I fixed turn-level replay cues, real office rendering, roster fidelity, current port
+targeting, fail-closed cue loading, MP4 status exposure, and visual regression checks.
+
+## Evidence
+
+- Epic 468/475 issues #462-#495 covered replay and MP4 export correctness.
+- Commits `27752b3f`, `77bcf622`, `ea948328`, `a19e662c`, `dde34a60`, and `039d148b` landed the fixes.
+- .alpha-loop summaries for epic 468 and 475 capture the replay fidelity learnings.
+
+## What Broke
+
+The first exports could look plausible while being wrong about turns, rosters, or
+routes.
+
+## Why It Matters
+
+The signal is evidence discipline: visual output is not evidence unless it is faithful.
+
+## What Changed Next
+
+The same concern pushed the project toward a world where action could be independently
+verified: Minecraft.
+
+## Series Navigation
+
+- Previous: `/blog/simulation-first-pivot`
+- Next: `/blog/minecraft-pivot`

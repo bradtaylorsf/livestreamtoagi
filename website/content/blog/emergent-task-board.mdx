@@ -1,0 +1,46 @@
+---
+title: "Emergent Task Boards Beat Phase Machines"
+date: "2026-05-28"
+excerpt: "The emergent task board replaced phase-machine scripting with first-claim-wins coordination."
+tags: ["tasks", "emergence", "minecraft"]
+author: "Brad Taylor"
+---
+
+# Emergent Task Boards Beat Phase Machines
+
+This research note is backdated to 2026-05-28, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+Can agents coordinate around shared objectives without a rigid settlement script?
+
+## System Move
+
+I added settlement objective seeding, atomic first-claim-wins task board behavior,
+Director tool adapter wiring, environment-driven model resolution, emergent build mode,
+prompt teaching, acceptance tests, and embodied bot bridge commands.
+
+## Evidence
+
+- Issues #902-#909 covered task board, shared objectives, tool adapter wiring, emergent mode, prompts, and acceptance tests.
+- Commits `7dd4b062`, `3fb640b2`, `e3cc8630`, `5e35315d`, `9e7ef3fd`, `d43bd330`, and `31eb63d4` landed the mode.
+- `docs/minecraft/emergent-mode.md` and the epic-820 alpha-loop summary describe the emergent task loop.
+
+## What Broke
+
+Prompting agents to build emergently is not enough; authorization and task ownership
+have to be explicit.
+
+## Why It Matters
+
+The signal is replacing brittle phase scripts with coordination primitives.
+
+## What Changed Next
+
+That led to claim-task as the gate for build authorization.
+
+## Series Navigation
+
+- Previous: `/blog/civilization-mechanics-social-infrastructure`
+- Next: `/blog/claim-task-earn-build-right`

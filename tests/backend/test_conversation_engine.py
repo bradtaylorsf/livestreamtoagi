@@ -11,7 +11,8 @@ import pytest
 
 import core.simulation.phases as phases_module
 from core.bootstrap import ConversationOptions, InfraServices, MemoryServices
-from core.conversation_engine import ConversationEngine
+from core.conversation.energy import ConversationEnergy
+from core.conversation_engine import ConversationEngine, _ActiveConversation
 from core.event_bus import EventType
 from core.models import (
     AgentConfig,
@@ -505,9 +506,7 @@ class TestConversationFlow:
         mock_selection_logger.log_selection.assert_awaited()
         mock_selection_logger.log_energy.assert_awaited()
 
-    async def test_history_accumulates(
-        self, engine: ConversationEngine
-    ) -> None:
+    async def test_history_accumulates(self, engine: ConversationEngine) -> None:
         """Each turn adds a message to the conversation history."""
         trigger = {"type": "idle", "location": "town_square"}
         await engine._start_conversation(trigger)
@@ -564,9 +563,7 @@ class TestEnergyDepletion:
 
         # Should have emitted at least one more speak event (closing line)
         emit_calls = mock_event_bus.emit.call_args_list
-        speak_events = [
-            c for c in emit_calls if c[0][0] == EventType.AGENT_SPEAK.value
-        ]
+        speak_events = [c for c in emit_calls if c[0][0] == EventType.AGENT_SPEAK.value]
         assert len(speak_events) >= 1
         # The closing event should have is_closing=True
         last_speak_data = speak_events[-1][0][1]
@@ -708,9 +705,7 @@ class TestMutedAgent:
         """Muted agents are filtered out of eligible speakers."""
         muted_agent = _make_agent("rex", status=AgentStatus.muted)
         active_agent = _make_agent("vera")
-        mock_proximity.get_eligible_speakers = AsyncMock(
-            return_value=[muted_agent, active_agent]
-        )
+        mock_proximity.get_eligible_speakers = AsyncMock(return_value=[muted_agent, active_agent])
 
         trigger = {"type": "idle", "location": "town_square"}
         await engine._start_conversation(trigger)
@@ -743,11 +738,7 @@ class TestMutedAgent:
         # The selector should only receive non-muted agents
         call_kwargs = mock_select.call_args
         kw = call_kwargs[1] or {}
-        eligible = (
-            kw["eligible_agents"]
-            if "eligible_agents" in kw
-            else call_kwargs[0][1]
-        )
+        eligible = kw["eligible_agents"] if "eligible_agents" in kw else call_kwargs[0][1]
         agent_ids = [a.id for a in eligible]
         assert "rex" not in agent_ids
 
@@ -836,8 +827,7 @@ class TestEavesdropper:
 
         # Should have emitted an agent_move event for grok
         move_events = [
-            c for c in mock_event_bus.emit.call_args_list
-            if c[0][0] == EventType.AGENT_MOVE.value
+            c for c in mock_event_bus.emit.call_args_list if c[0][0] == EventType.AGENT_MOVE.value
         ]
         assert len(move_events) == 1
         assert move_events[0][0][1]["agent_id"] == "grok"
@@ -872,6 +862,7 @@ class TestRunLoop:
         self, engine: ConversationEngine, mock_trigger_system: MagicMock
     ) -> None:
         """Calling stop() terminates the run loop."""
+
         async def _stop_after_one() -> dict | None:
             engine.stop()
             return None
@@ -949,6 +940,69 @@ class TestGenerateTurn:
         content = await engine._generate_turn(agent)
 
         assert content == "Got it!"
+
+    async def test_forced_tool_is_not_reinjected_after_management_retry(
+        self,
+        engine: ConversationEngine,
+        mock_llm: MagicMock,
+        mock_management: MagicMock,
+        config: ConversationConfig,
+    ) -> None:
+        """A trigger-forced tool should fire once even if Management retries the turn."""
+
+        first = _make_llm_response("I will check the world first.")
+        first.tool_calls = [ToolCall(id="ignored", name="get_world_state", arguments={})]
+        second = _make_llm_response("Final text after tools.")
+        second.tool_calls = [ToolCall(id="duplicate", name="propose_build", arguments={})]
+        third = _make_llm_response("Retrying with the build already recorded.")
+        mock_llm.complete = AsyncMock(side_effect=[first, second, third])
+        mock_management.review = AsyncMock(
+            side_effect=[
+                ContentReviewResult(
+                    approved=False,
+                    reason="retry",
+                    severity=3,
+                ),
+                ContentReviewResult(approved=True, reason="OK", severity=1),
+            ]
+        )
+        engine._active = _ActiveConversation(
+            conversation_id=uuid.uuid4(),
+            trigger={
+                "type": "scheduled",
+                "tool_choice": {"type": "function", "function": {"name": "propose_build"}},
+                "tool_args": {
+                    "structure_type": "coliseum",
+                    "size_class": "epic",
+                    "location_intent": "open_area",
+                },
+            },
+            energy=ConversationEnergy(config.energy),
+            participants=["rex"],
+        )
+        engine._get_tools_for_agent = MagicMock(  # type: ignore[method-assign]
+            return_value={"propose_build": object(), "get_world_state": object()}
+        )
+
+        with (
+            patch("core.conversation_engine.tools_to_openai_schema", return_value=[]),
+            patch(
+                "core.conversation_engine.execute_tool_calls",
+                new=AsyncMock(return_value=[]),
+            ) as execute_tool_calls_mock,
+        ):
+            content = await engine._generate_turn(_make_agent("rex"))
+
+        assert content == "Retrying with the build already recorded."
+        assert execute_tool_calls_mock.await_count == 1
+        tool_calls = execute_tool_calls_mock.await_args.args[0]
+        assert [call.name for call in tool_calls] == ["propose_build", "get_world_state"]
+        assert tool_calls[0].arguments == {
+            "structure_type": "coliseum",
+            "size_class": "epic",
+            "location_intent": "open_area",
+        }
+        assert engine._active.forced_tools_consumed == {"propose_build"}
 
 
 # ── Test: No eligible agents skips trigger ─────────────────────
@@ -1475,9 +1529,9 @@ class TestConversationProgression:
         # After 4 dialogue-only turns, history should contain nudge message
         conv = engine.active_conversation
         nudge_msgs = [
-            msg for msg in conv.history
-            if msg.get("role") == "user"
-            and "taking action" in msg.get("content", "")
+            msg
+            for msg in conv.history
+            if msg.get("role") == "user" and "taking action" in msg.get("content", "")
         ]
         assert len(nudge_msgs) >= 1
 
@@ -1499,8 +1553,7 @@ class TestConversationProgression:
 
         # Find the productivity event
         productivity_calls = [
-            c for c in mock_event_bus.emit.call_args_list
-            if c[0][0] == "conversation_productivity"
+            c for c in mock_event_bus.emit.call_args_list if c[0][0] == "conversation_productivity"
         ]
         assert len(productivity_calls) == 1
         data = productivity_calls[0][0][1]

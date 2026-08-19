@@ -225,6 +225,8 @@ def test_run_headless_sim_cli_accepts_required_flags() -> None:
             "7",
             "--output-dir",
             "/tmp/headless-out",
+            "--collaborative-build-mode",
+            "roles",
         ]
     )
     assert ns.scenario == "scenarios/dream_smoke_test.yaml"
@@ -233,3 +235,4 @@ def test_run_headless_sim_cli_accepts_required_flags() -> None:
     assert ns.max_cost == 0.01
     assert ns.seed == 7
     assert ns.output_dir == "/tmp/headless-out"
+    assert ns.collaborative_build_mode == "roles"

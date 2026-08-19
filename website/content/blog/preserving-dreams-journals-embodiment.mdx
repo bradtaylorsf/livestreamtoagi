@@ -1,0 +1,47 @@
+---
+title: "Preserving Dreams and Journals Through Embodiment"
+date: "2026-05-24"
+excerpt: "Dreams, journals, image generation, and website publishing had to survive the move into embodied Minecraft runs."
+tags: ["journals", "dreams", "embodiment"]
+author: "Brad Taylor"
+---
+
+# Preserving Dreams and Journals Through Embodiment
+
+This research note is backdated to 2026-05-24, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+Can reflective systems survive a change in world substrate?
+
+## System Move
+
+I preserved reflection, dreams, journals, generated journal illustrations, website
+publishing, and regression tests while the agent world moved from simulation to
+Minecraft embodiment.
+
+## Evidence
+
+- E9 issues #581-#586 and #709 covered dreams, journals, and website publishing preservation.
+- Commits `3cf773e5`, `bb4749a0`, `5816287f`, and `94cab199` landed the preservation work.
+- `docs/run-modes.md`, journal code paths, and the epic-511 alpha-loop records anchor the feature migration.
+
+## What Broke
+
+World-layer migrations can silently drop reflective features if tests only cover action
+execution.
+
+## Why It Matters
+
+The signal is continuity discipline: preserve identity and reflection while changing
+embodiment.
+
+## What Changed Next
+
+Evals also had to adapt to embodied events.
+
+## Series Navigation
+
+- Previous: `/blog/open-source-readiness-safety-gate`
+- Next: `/blog/embodied-eval-reporting`

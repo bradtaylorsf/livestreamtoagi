@@ -26,6 +26,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
+from core.minecraft.collaborative_build import (
+    CollaborativeBuildJob,
+    CollaborativeBuildLedger,
+    ledger_path_for,
+    load_collaborative_build_ledger,
+)
 from core.simulation.decision_logger import DecisionLogReader
 
 ReplayMilestone = Literal[
@@ -106,6 +112,9 @@ class ReplayScheduler:
 
     sim_folder: Path
     enabled_milestones: tuple[ReplayMilestone, ...] = REPLAY_MILESTONES
+    collaborative_builds: bool = False
+    collaborative_step_seconds: float = 3.0
+    intent_ids: frozenset[str] | None = None
     _events: list[ReplayEvent] = field(default_factory=list, init=False)
     _build_intent_rows: list[_BuildIntentRow] = field(default_factory=list, init=False)
     _build_scripts_dir: Path = field(init=False)
@@ -114,6 +123,8 @@ class ReplayScheduler:
         self.sim_folder = Path(self.sim_folder)
         self._build_scripts_dir = self.sim_folder / "build_scripts"
         self.enabled_milestones = tuple(self.enabled_milestones)
+        if self.intent_ids is not None:
+            self.intent_ids = frozenset(str(intent_id) for intent_id in self.intent_ids)
 
     def events(self) -> list[ReplayEvent]:
         if self._events:
@@ -147,41 +158,55 @@ class ReplayScheduler:
                     if isinstance(row.payload.args, dict)
                     else None
                 )
-                if isinstance(intent_id, str) and intent_id in intents_by_id:
+                if (
+                    isinstance(intent_id, str)
+                    and intent_id in intents_by_id
+                    and self._intent_allowed(intent_id)
+                ):
                     consumed_intent_ids.add(intent_id)
-                    script_path = self._script_path_for(intent_id)
-                    events.append(
-                        ExecuteBuildScriptEvent(
-                            sim_time=sim_time,
-                            tick=tick,
-                            row_idx=row_idx,
-                            actor_id=row.actor_id or "unknown",
-                            intent_id=intent_id,
-                            script_path=script_path,
-                        )
+                    collaborative_events = self._collaborative_events_for(
+                        intent_id=intent_id,
+                        actor_id=row.actor_id or "unknown",
+                        sim_time=sim_time,
+                        tick=tick,
+                        row_idx=row_idx,
                     )
-                    if "build_start" in self.enabled_milestones:
+                    if collaborative_events:
+                        events.extend(collaborative_events)
+                    else:
+                        script_path = self._script_path_for(intent_id)
                         events.append(
-                            ScreenshotEvent(
+                            ExecuteBuildScriptEvent(
                                 sim_time=sim_time,
                                 tick=tick,
                                 row_idx=row_idx,
-                                milestone="build_start",
-                                label=f"build_start_{intent_id}",
+                                actor_id=row.actor_id or "unknown",
                                 intent_id=intent_id,
+                                script_path=script_path,
                             )
                         )
-                    if "build_complete" in self.enabled_milestones:
-                        events.append(
-                            ScreenshotEvent(
-                                sim_time=sim_time,
-                                tick=tick,
-                                row_idx=row_idx + 1,
-                                milestone="build_complete",
-                                label=f"build_complete_{intent_id}",
-                                intent_id=intent_id,
+                        if "build_start" in self.enabled_milestones:
+                            events.append(
+                                ScreenshotEvent(
+                                    sim_time=sim_time,
+                                    tick=tick,
+                                    row_idx=row_idx,
+                                    milestone="build_start",
+                                    label=f"build_start_{intent_id}",
+                                    intent_id=intent_id,
+                                )
                             )
-                        )
+                        if "build_complete" in self.enabled_milestones:
+                            events.append(
+                                ScreenshotEvent(
+                                    sim_time=sim_time,
+                                    tick=tick,
+                                    row_idx=row_idx + 1,
+                                    milestone="build_complete",
+                                    label=f"build_complete_{intent_id}",
+                                    intent_id=intent_id,
+                                )
+                            )
             elif event_type == "relationship_delta" and "conflict" in self.enabled_milestones:
                 before = row.payload.before or {}
                 after = row.payload.after or {}
@@ -243,6 +268,8 @@ class ReplayScheduler:
         for row in self._build_intent_rows:
             if row.intent_id in consumed_intent_ids:
                 continue
+            if not self._intent_allowed(row.intent_id):
+                continue
             events.append(
                 ExecuteBuildScriptEvent(
                     sim_time=row.submitted_at,
@@ -262,6 +289,76 @@ class ReplayScheduler:
 
     def _script_path_for(self, intent_id: str) -> Path:
         return self._build_scripts_dir / f"{intent_id}.script.json"
+
+    def _intent_allowed(self, intent_id: str) -> bool:
+        return self.intent_ids is None or intent_id in self.intent_ids
+
+    def _collaborative_events_for(
+        self,
+        *,
+        intent_id: str,
+        actor_id: str,
+        sim_time: float,
+        tick: int,
+        row_idx: int,
+    ) -> list[ReplayEvent]:
+        if not self.collaborative_builds:
+            return []
+        ledger_path = ledger_path_for(self.sim_folder, intent_id)
+        if not ledger_path.is_file():
+            return []
+        ledger = load_collaborative_build_ledger(ledger_path)
+        events: list[ReplayEvent] = []
+        step = max(0.0, float(self.collaborative_step_seconds))
+        base_row_idx = row_idx * 1000
+        for offset, job in enumerate(ledger.jobs):
+            job_time = sim_time + (offset * step)
+            job_row_idx = base_row_idx + offset
+            events.append(
+                ChatEvent(
+                    sim_time=job_time,
+                    tick=tick,
+                    row_idx=job_row_idx,
+                    actor_id=job.owner_agent_id,
+                    text=_collaborative_chat_for_job(ledger, job),
+                )
+            )
+            if job.role != "builder" or not job.script_path:
+                continue
+            script_path = self.sim_folder / job.script_path
+            if "build_start" in self.enabled_milestones:
+                events.append(
+                    ScreenshotEvent(
+                        sim_time=job_time,
+                        tick=tick,
+                        row_idx=job_row_idx,
+                        milestone="build_start",
+                        label=f"collab_build_start_{job.job_id}",
+                        intent_id=job.job_id,
+                    )
+                )
+            events.append(
+                ExecuteBuildScriptEvent(
+                    sim_time=job_time,
+                    tick=tick,
+                    row_idx=job_row_idx,
+                    actor_id=job.owner_agent_id or actor_id,
+                    intent_id=job.job_id,
+                    script_path=script_path,
+                )
+            )
+            if "build_complete" in self.enabled_milestones:
+                events.append(
+                    ScreenshotEvent(
+                        sim_time=job_time,
+                        tick=tick,
+                        row_idx=job_row_idx + 1,
+                        milestone="build_complete",
+                        label=f"collab_build_complete_{job.job_id}",
+                        intent_id=job.job_id,
+                    )
+                )
+        return events
 
     def _iter_decision_rows(self):
         log_path = self.sim_folder / "decision_log.jsonl"
@@ -312,3 +409,39 @@ def _coerce_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _collaborative_chat_for_job(
+    ledger: CollaborativeBuildLedger,
+    job: CollaborativeBuildJob,
+) -> str:
+    if job.role == "manager":
+        return (
+            f"I am managing {ledger.source_intent_id}: {len(ledger.jobs)} jobs, "
+            f"{ledger.total_source_commands} build commands, with dependencies assigned."
+        )
+    if job.role == "resource_gatherer":
+        return f"Resource job {job.job_id}: staging {_materials_text(job.materials)}."
+    if job.role == "crafter":
+        return f"Crafting job {job.job_id}: preparing {_materials_text(job.materials)}."
+    if job.role == "builder":
+        return (
+            f"Builder job {job.job_id}: {job.title.lower()}, "
+            f"{job.command_count} commands and {job.total_blocks} blocks."
+        )
+    if job.role == "inspector":
+        return (
+            f"Inspection job {job.job_id}: checking dimensions, materials, gates, "
+            "and recognizable completion."
+        )
+    return f"Collaborative job {job.job_id}: {job.title}."
+
+
+def _materials_text(materials: dict[str, int]) -> str:
+    if not materials:
+        return "no block materials"
+    chunks = [f"{count} {material}" for material, count in sorted(materials.items())[:4]]
+    extra = len(materials) - len(chunks)
+    if extra > 0:
+        chunks.append(f"{extra} more material types")
+    return ", ".join(chunks)

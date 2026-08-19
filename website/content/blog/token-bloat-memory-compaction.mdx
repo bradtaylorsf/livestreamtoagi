@@ -1,0 +1,48 @@
+---
+title: "Token Bloat, Compaction, and Long-Running Agents"
+date: "2026-04-12"
+excerpt: "Long-running agents need compaction because the context window becomes a survival constraint."
+tags: ["memory", "context", "long-running-agents"]
+author: "Brad Taylor"
+---
+
+# Token Bloat, Compaction, and Long-Running Agents
+
+This research note is backdated to 2026-04-12, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+What happens when a persistent agent carries too much history into every turn?
+
+## System Move
+
+I added memory compaction for long-running simulations and treated token pressure as an
+architectural constraint. The goal was not just lower cost; it was preserving useful
+identity and recall under bounded context.
+
+## Evidence
+
+- Commit `b01cc321` addressed token bloat and added memory compaction for long-running simulations.
+- `core/memory/` contains the compaction and memory-management code paths.
+- `specs/MEMORY-SYSTEM.md` defines why core, recall, and archival tiers need separate behavior.
+
+## What Broke
+
+Compaction can erase the wrong detail. Compression is not neutral when identity and
+goals are encoded in the data.
+
+## Why It Matters
+
+The signal is long-horizon systems thinking: context limits shape behavior, cost, and
+reliability.
+
+## What Changed Next
+
+The next wave of work made simulations easier to browse, run, and evaluate from the
+dashboard.
+
+## Series Navigation
+
+- Previous: `/blog/simulation-isolation-counterfactuals`
+- Next: `/blog/dashboard-walkthrough-product-shift`

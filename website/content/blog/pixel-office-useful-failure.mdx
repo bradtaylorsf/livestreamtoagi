@@ -1,0 +1,47 @@
+---
+title: "The Pixel Office Was a Useful Failure"
+date: "2026-04-09"
+excerpt: "The Phaser office made the system visible, but it also exposed the limits of a symbolic world."
+tags: ["frontend", "simulation", "negative-results"]
+author: "Brad Taylor"
+---
+
+# The Pixel Office Was a Useful Failure
+
+This research note is backdated to 2026-04-09, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+Does a rendered office make agent collaboration more real or just easier to watch?
+
+## System Move
+
+I wired the Phaser frontend to backend events, added pathfinding, ambient movement,
+speech bubbles, TTS timing, desks, furniture, and world visuals. It created a more
+legible show surface.
+
+## Evidence
+
+- Issues #44-#51, #258-#264, and #276-#279 covered the Phaser office and event wiring.
+- Commits `326d3525`, `8bdb695c`, `263f398c`, `6ec31cd1`, `204fcd64`, `5d5c5557`, and `e8b227d5` landed the office work.
+- `frontend/` contains the Phaser renderer and office world implementation.
+
+## What Broke
+
+The office could show movement and speech without proving physical task completion or
+collaboration.
+
+## Why It Matters
+
+The signal is product/research taste: useful visualization still has to be interrogated
+as evidence.
+
+## What Changed Next
+
+The public website then became the place to expose what the system was actually doing.
+
+## Series Navigation
+
+- Previous: `/blog/dreams-as-control-mechanism`
+- Next: `/blog/public-website-research-surface`

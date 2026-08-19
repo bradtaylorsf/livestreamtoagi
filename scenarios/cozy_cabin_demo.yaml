@@ -1,0 +1,105 @@
+# Cozy Cabin Demo
+#
+# Short local-model headless scenario for live demos: the agents agree on a
+# small starter house, Rex claims it, and emits a `cabin` BuildIntent. The
+# compiled BuildScript is then replayed in Minecraft by visible agent bots.
+
+meta:
+  name: "Cozy Cabin Demo"
+  description: "Agents coordinate a small starter cabin and propose one cabin build intent."
+  agents: [vera, rex, aurora, fork, sentinel, pixel]
+  supports_modes: [headless]
+  expected_max_cost: 0.02
+  expected_runtime_minutes: 5
+
+eval_targets:
+  primary: [social_dynamics, agency]
+  secondary: [world_evolution, creativity]
+  success_criteria:
+    social_dynamics: "agents_agree_on_a_single_starter_house_before_the_build_intent"
+    agency: "rex_claims_ownership_and_calls_propose_build"
+    world_evolution: "cabin_buildscript_compiles_from_the_catalog_plan"
+
+run_mode: headless
+management_policy: shadow
+experimental_goal:
+  kind: artifacts
+  target: 1
+
+agents:
+  - vera
+  - rex
+  - aurora
+  - fork
+  - sentinel
+  - pixel
+
+world:
+  world_type: default
+  seed: 20260817
+  persistent: false
+
+memory_seed:
+  mode: none
+
+persona_overrides:
+  - agent_id: vera
+    backstory: "Vera is running a short demo build and wants one small, finishable starter house rather than an ambitious megaproject."
+    system_prompt_append: "For this run, keep scope tiny: a single-room oak cabin, roughly 7 x 6 with 3-block walls and one door. The accepted library structure_type is cabin."
+  - agent_id: rex
+    backstory: "Rex is the build owner: practical, fast, and happy to turn a small agreed design into a concrete build intent."
+    system_prompt_append: "When the team agrees, say you claim the cabin build and call propose_build with structure_type=cabin, size_class=medium, location_intent=open_area."
+
+agent_goals:
+  vera:
+    - "Keep the scope to one small starter cabin: 7 x 6 footprint, 3-block walls, one door."
+    - "Assign Rex as build owner and ask Fork to sanity-check the plan."
+  rex:
+    - "Claim ownership of the cabin build."
+    - "Call propose_build exactly once with structure_type=cabin, size_class=medium, location_intent=open_area."
+  aurora:
+    - "Name the materials: oak plank floor, oak log walls, dark oak plank roof."
+  fork:
+    - "Check the cabin has a floor, walls, a roof, and a door before the tool call."
+  sentinel:
+    - "Confirm this stays a cheap open_area build and nobody starts a competing project."
+  pixel:
+    - "Summarize who owns the build and what is getting built."
+
+factions:
+  - name: cabin_crew
+    members: [vera, rex, aurora]
+    goal: "Agree on one small starter cabin and get it built."
+    stance: build-owner-and-design
+  - name: scope_review
+    members: [fork, sentinel, pixel]
+    goal: "Keep the cabin small, complete, and cheap."
+    stance: review-and-evidence
+
+phases:
+  - name: cabin_design
+    type: scheduled
+    trigger: cabin_design
+    required_agents: [vera, rex, aurora, fork]
+    topic: "Agree on one small starter cabin: 7 x 6 footprint, 3-block oak log walls, oak plank floor, dark oak plank roof, one door. Rex owns the build, Aurora picks materials, Fork sanity-checks."
+    location: build_site
+    max_turns: 4
+  - name: propose_cabin_build
+    type: tool_exercise
+    agent: rex
+    tool: propose_build
+    context: "Use propose_build now for the agreed starter cabin. Required arguments: structure_type=cabin, size_class=medium, location_intent=open_area, motivation='Build a small starter cabin so the team has shelter and a first finished structure.'"
+    tool_args:
+      structure_type: cabin
+      size_class: medium
+      location_intent: open_area
+      motivation: "Build a small starter cabin so the team has shelter and a first finished structure."
+    location: build_site
+    max_turns: 3
+  - name: cabin_review
+    type: scheduled
+    trigger: cabin_review
+    required_agents: [vera, fork, sentinel, pixel]
+    topic: "Review the proposed cabin build intent: does it have a floor, walls, a roof, and a door, and is it still small enough to finish?"
+    location: build_site
+    max_turns: 3

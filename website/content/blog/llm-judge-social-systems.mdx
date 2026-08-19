@@ -1,0 +1,48 @@
+---
+title: "LLM-as-Judge Evals for Artificial Social Systems"
+date: "2026-04-04"
+excerpt: "The 12-category eval suite became a practical, imperfect instrument for judging social agent behavior."
+tags: ["evals", "methodology", "llm-as-judge"]
+author: "Brad Taylor"
+---
+
+# LLM-as-Judge Evals for Artificial Social Systems
+
+This research note is backdated to 2026-04-04, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+How do I evaluate open-ended agent behavior without reducing it to a single fake score?
+
+## System Move
+
+I built a set of eval categories for creativity, agency, productivity, social dynamics,
+economic behavior, internal state, entertainment, safety, errors, dialogue quality,
+narrative, and world evolution. The point was to organize findings and turn them into
+implementation work.
+
+## Evidence
+
+- Issues #155-#158, #206-#212, and #240-#242 cover eval prompts, analysis UI, and the agency dimension.
+- Commits `e364c03c`, `da05c8dd`, `c76b6c5c`, and `c809620a` landed eval categories and analysis work.
+- `evals/prompts/*.yaml` and `evals/results/*.json` are the evaluation artifacts.
+
+## What Broke
+
+An LLM judge can reward fluent summaries and miss causal mechanisms. Every finding still
+needs implementation evidence.
+
+## Why It Matters
+
+The signal is pragmatic methodology: noisy evaluators can still be useful when their
+limits are explicit.
+
+## What Changed Next
+
+The same eval work also exposed that the safety role needed clearer framing.
+
+## Series Navigation
+
+- Previous: `/blog/repetition-problem`
+- Next: `/blog/overseer-to-management`

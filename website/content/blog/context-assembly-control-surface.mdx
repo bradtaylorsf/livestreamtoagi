@@ -1,0 +1,48 @@
+---
+title: "Context Assembly Is Where the Agent Actually Lives"
+date: "2026-04-02"
+excerpt: "The assembled prompt became the runtime interface where identity, memory, world state, tools, and safety met."
+tags: ["context", "prompts", "architecture"]
+author: "Brad Taylor"
+---
+
+# Context Assembly Is Where the Agent Actually Lives
+
+This research note is backdated to 2026-04-02, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+Where does an agent actually live at inference time?
+
+## System Move
+
+The context assembly layer joined personality, current state, memories, recent
+transcripts, tools, and constraints into the prompt seen by the model. This made prompt
+construction a production boundary rather than an ad hoc string-building step.
+
+## Evidence
+
+- Issue #21 tracked context window assembly for agent turns.
+- Commit `c58ddcdd` landed the initial context assembly implementation.
+- `core/context_assembly`, `core/system_prompt`, and `specs/MEMORY-SYSTEM.md` describe the prompt inputs.
+
+## What Broke
+
+A clean assembly layer can still hide stale or missing inputs if the upstream managers
+are not wired into the real runtime path.
+
+## Why It Matters
+
+The signal is architecture judgment: prompts are not copy; they are the interface where
+state becomes behavior.
+
+## What Changed Next
+
+Once single-agent turns could be assembled, the next problem was social: who should
+speak next?
+
+## Series Navigation
+
+- Previous: `/blog/three-tier-agent-memory`
+- Next: `/blog/first-conversation-engine`

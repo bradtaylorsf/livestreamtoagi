@@ -1,0 +1,47 @@
+---
+title: "The Python-to-Node Bridge"
+date: "2026-05-18"
+excerpt: "The Python-to-Node bridge connected Minecraft embodiment to memory, Management, cost gates, and observability."
+tags: ["bridge", "minecraft", "architecture"]
+author: "Brad Taylor"
+---
+
+# The Python-to-Node Bridge
+
+This research note is backdated to 2026-05-18, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+How should a Node bot ask the Python system for memory, safety review, and decisions?
+
+## System Move
+
+I built an authenticated bridge contract between Mindcraft and the Python backend. The
+bridge preserved Management review, model routing, cost visibility, kill-switch
+compatibility, and observability instead of letting the Node side become a parallel
+brain.
+
+## Evidence
+
+- E4 issues #540-#548 covered the bridge contract and integration.
+- Commit `0daec3fe` completed the Python-Node bridge epic.
+- `docs/decisions/0010-bridge-protocol.md`, `docs/minecraft/bridge-contract.md`, and `.alpha-loop/learnings/session-session-epic-506-epic-e4-python-node-bridge.json` describe the protocol.
+
+## What Broke
+
+Every bridge verb is a distributed-systems contract; success labels from one side are
+not proof of world-state change.
+
+## Why It Matters
+
+The signal is boundary design across languages and runtimes.
+
+## What Changed Next
+
+The first service to expose through that bridge was memory.
+
+## Series Navigation
+
+- Previous: `/blog/forking-mindcraft`
+- Next: `/blog/memory-leaves-office`

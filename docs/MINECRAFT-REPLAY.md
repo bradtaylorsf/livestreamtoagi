@@ -22,6 +22,25 @@ python scripts/replay_in_minecraft.py \
     --speed-multiplier 4.0 \
     --screenshot-milestones build_start,build_complete,hourly \
     --output-dir runs/headless/abc-123/replay/manual-run
+
+# Collaborative build-mode artifacts from a new headless run
+python scripts/run_headless_sim.py \
+    --scenario scenarios/roman_colosseum_blueprint_coordination.yaml \
+    --duration 8m \
+    --collaborative-build-mode roles \
+    --output-dir snapshots/headless
+
+# Retrofit collaborative artifacts onto an existing headless sim
+python scripts/minecraft/create_collaborative_build.py \
+    --sim-folder snapshots/headless/<run-folder>
+
+# Watch dialog + collaborative build jobs on a local RCON server
+python scripts/minecraft/replay_headless_to_rcon.py \
+    --sim-folder snapshots/headless/<run-folder> \
+    --collaborative-builds \
+    --intent-id build-6369f2a26b28 \
+    --rcon-host 127.0.0.1 \
+    --rcon-port 25575
 ```
 
 Outputs:
@@ -39,6 +58,41 @@ Outputs:
 | `--profile`                | the live-eval default profile          | Minecraft live eval profile                   |
 | `--output-dir`             | `<sim-folder>/replay/<timestamp>`      | Where screenshots + manifest land             |
 | `--dry-run`                | off (auto-on without bridge env)       | Force the deterministic fake bridge           |
+| `--collaborative-builds`   | off                                    | Use per-role job scripts from `collaborative_builds/` when present |
+| `--intent-id`              | all builds                             | Replay only a specific build intent; repeat for multiple builds |
+
+## Collaborative Build Mode
+
+Headless runs normally compile each `propose_build` into one macro
+`BuildScript`. Passing `--collaborative-build-mode roles` keeps that
+source script, then writes an additional role ledger:
+
+```
+<sim-folder>/collaborative_builds/<intent_id>/ledger.json
+<sim-folder>/collaborative_builds/<intent_id>/summary.md
+<sim-folder>/collaborative_builds/<intent_id>/jobs/*.script.json
+```
+
+The ledger assigns a manager, resource gatherers, crafters, builders, and
+an inspector. Builder jobs are sequential chunks of the original compiler
+command order so gates, arches, and other carve-after-fill operations keep
+their intended behavior. The non-builder jobs are replayed as explicit
+agent chat/work steps; builder jobs execute their own smaller scripts.
+
+Default role env vars:
+
+```
+MC_SIM_COLLAB_MANAGER=vera
+MC_SIM_COLLAB_RESOURCE_GATHERERS=sentinel,fork
+MC_SIM_COLLAB_CRAFTERS=aurora,pixel
+MC_SIM_COLLAB_BUILDERS=rex,alpha
+MC_SIM_COLLAB_INSPECTOR=vera
+```
+
+`scripts/minecraft/replay_headless_to_rcon.py --collaborative-builds`
+uses the same replay schedule but sends chat with `/say` and block
+commands over RCON, which is useful when a local server is running but the
+Mineflayer bridge is not.
 
 ## Milestones
 

@@ -95,7 +95,8 @@ def main(
             else sim_folder / "replay" / datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         )
         selected_bridge, dry_run = (
-            (bridge, args.dry_run) if bridge is not None
+            (bridge, args.dry_run)
+            if bridge is not None
             else _make_replay_bridge(args, resolved_env)
         )
         manifest = asyncio.run(
@@ -107,6 +108,8 @@ def main(
                 milestones=milestones,
                 world_profile=args.profile,
                 dry_run=dry_run,
+                collaborative_builds=args.collaborative_builds,
+                intent_ids=frozenset(args.intent_id) if args.intent_id else None,
             )
         )
     except (LiveBridgeConfigError, OSError, ValueError) as exc:
@@ -156,6 +159,20 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Force the deterministic fake bridge (default unless MC_EVAL_LIVE_ENABLED=1)",
     )
+    parser.add_argument(
+        "--collaborative-builds",
+        action="store_true",
+        help=(
+            "Replay role-based collaborative build jobs when "
+            "<sim-folder>/collaborative_builds artifacts exist."
+        ),
+    )
+    parser.add_argument(
+        "--intent-id",
+        action="append",
+        default=None,
+        help="Only replay one build intent id. Repeat to include multiple builds.",
+    )
     return parser
 
 
@@ -169,7 +186,10 @@ def _make_replay_bridge(
     rather than the eval :class:`FakeBridgeClient` (strict to the
     seven-command eval vocabulary).
     """
-    if args.dry_run or env.get("MC_EVAL_LIVE_ENABLED", "").strip().casefold() not in _LIVE_ENABLED_VALUES:
+    if (
+        args.dry_run
+        or env.get("MC_EVAL_LIVE_ENABLED", "").strip().casefold() not in _LIVE_ENABLED_VALUES
+    ):
         return FakeReplayBridge(), True
 
     missing = [key for key in _REQUIRED_LIVE_ENV if not env.get(key)]
@@ -198,8 +218,7 @@ def _parse_milestones(raw: str) -> tuple[ReplayMilestone, ...]:
             continue
         if token not in valid:
             raise ValueError(
-                f"unknown screenshot milestone {token!r}; "
-                f"valid: {', '.join(sorted(valid))}"
+                f"unknown screenshot milestone {token!r}; valid: {', '.join(sorted(valid))}"
             )
         parsed.append(token)  # type: ignore[arg-type]
     return tuple(parsed)
@@ -214,6 +233,8 @@ async def run_replay(
     milestones: Sequence[ReplayMilestone] = REPLAY_MILESTONES,
     world_profile: str = DEFAULT_PROFILE_NAME,
     dry_run: bool = True,
+    collaborative_builds: bool = False,
+    intent_ids: frozenset[str] | None = None,
 ) -> ReplayManifest:
     """Walk the sim folder's scheduled events against ``bridge``."""
 
@@ -221,7 +242,12 @@ async def run_replay(
     screenshots_dir = output_dir / "screenshots"
     screenshots_dir.mkdir(parents=True, exist_ok=True)
 
-    scheduler = ReplayScheduler(sim_folder=sim_folder, enabled_milestones=tuple(milestones))
+    scheduler = ReplayScheduler(
+        sim_folder=sim_folder,
+        enabled_milestones=tuple(milestones),
+        collaborative_builds=collaborative_builds,
+        intent_ids=intent_ids,
+    )
     events = scheduler.events()
 
     manifest = ReplayManifest(
@@ -253,9 +279,7 @@ async def run_replay(
         last_sim_time = event.sim_time
 
         if isinstance(event, ChatEvent):
-            await bridge.send_command(
-                f"!chat {event.actor_id} {_escape_chat(event.text)}"
-            )
+            await bridge.send_command(f"!chat {event.actor_id} {_escape_chat(event.text)}")
             chat_count += 1
         elif isinstance(event, PoseEvent):
             pos = event.position

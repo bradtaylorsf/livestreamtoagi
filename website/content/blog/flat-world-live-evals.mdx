@@ -1,0 +1,46 @@
+---
+title: "From Text Commands to Live Flat-World Evals"
+date: "2026-05-23"
+excerpt: "E18 moved from text command artifacts to live flat-world evaluation with action telemetry."
+tags: ["minecraft", "live-evals", "verification"]
+author: "Brad Taylor"
+---
+
+# From Text Commands to Live Flat-World Evals
+
+This research note is backdated to 2026-05-23, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+What breaks when passing text commands meet a real Minecraft world?
+
+## System Move
+
+I added a deterministic flat-world profile, individual command smoke CLI, dataset replay
+runner, pathfinding/collision categories, inventory and block mutation evals, death-loop
+and safe-spawn checks, multi-agent timing, and live reports.
+
+## Evidence
+
+- E18 issues #784-#791 covered flat-world live eval jobs.
+- Commits `f5c8f389`, `3fca4e54`, `aa4f67c4`, `95145173`, `e4b1b03d`, `d96b5663`, `dafbeaa2`, and `6c9765c8` landed the categories.
+- `docs/minecraft/open-settlement-smoke.md`, `docs/minecraft/failure-taxonomy.md`, and the epic-773 alpha-loop summary ground the live evals.
+
+## What Broke
+
+Live-world failures include pathfinding, timing, inventory, spawn, and bridge issues
+that pure text evals cannot see.
+
+## Why It Matters
+
+The signal is validation layering from cheap static checks to stateful world checks.
+
+## What Changed Next
+
+Before opening the repo wider, I needed public safety and readiness gates.
+
+## Series Navigation
+
+- Previous: `/blog/minecraft-commands-without-minecraft`
+- Next: `/blog/open-source-readiness-safety-gate`

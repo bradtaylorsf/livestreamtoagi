@@ -1,0 +1,114 @@
+# Roman Colosseum Blueprint Coordination
+#
+# Local-model-only headless scenario for testing whether the agents can
+# coordinate around a concrete Minecraft blueprint and emit a structured
+# coliseum BuildIntent. The post-run verifier compares the compiled
+# BuildScript against building/blueprints/roman-colosseum.png.
+
+meta:
+  name: "Roman Colosseum Blueprint Coordination"
+  description: "Agents coordinate roles, claim ownership, and propose a Roman Colosseum build from the supplied blueprint."
+  agents: [vera, rex, aurora, fork, sentinel, pixel]
+  supports_modes: [headless]
+  expected_max_cost: 0.05
+  expected_runtime_minutes: 8
+
+eval_targets:
+  primary: [social_dynamics, world_evolution, agency]
+  secondary: [productivity, creativity]
+  success_criteria:
+    social_dynamics: "three_or_more_agents_coordinate_roles_before_the_build_intent"
+    agency: "rex_or_vera_claims_ownership_and_calls_propose_build"
+    world_evolution: "coliseum_buildscript_compiles_from_the_blueprint_reference"
+
+run_mode: headless
+management_policy: shadow
+experimental_goal:
+  kind: artifacts
+  target: 4
+
+agents:
+  - vera
+  - rex
+  - aurora
+  - fork
+  - sentinel
+  - pixel
+
+world:
+  world_type: default
+  seed: 20260605
+  persistent: false
+
+memory_seed:
+  mode: none
+
+persona_overrides:
+  - agent_id: vera
+    backstory: "Vera treats the Roman Colosseum blueprint as the source of truth and keeps the team honest about dimensions, materials, and gates."
+    system_prompt_append: "For this run, coordinate from the exact blueprint path /Users/bradtaylor/Documents/GitHub/livestreamtoagi/building/blueprints/roman-colosseum.png. The accepted library structure_type is coliseum, not colosseum."
+  - agent_id: rex
+    backstory: "Rex is the build owner candidate: fast, practical, and willing to turn the blueprint into a concrete build intent."
+    system_prompt_append: "When the team agrees to build, say you claim the build and call propose_build with structure_type=coliseum, size_class=epic, location_intent=open_area, and reference_image_id=/Users/bradtaylor/Documents/GitHub/livestreamtoagi/building/blueprints/roman-colosseum.png."
+
+agent_goals:
+  vera:
+    - "Read the blueprint constraints aloud: 120 width, 100 depth, 42 height, 56 x 36 arena, four gate directions, and four arch tiers plus attic wall."
+    - "Assign Rex as build owner and ask Fork or Sentinel to review the resulting plan."
+  rex:
+    - "Claim ownership of the Roman Colosseum build."
+    - "Call propose_build exactly once with structure_type=coliseum, size_class=epic, location_intent=open_area, motivation tied to the blueprint, and the exact reference_image_id path."
+  aurora:
+    - "Name the visual materials from the blueprint: sandstone walls, stone-brick base, tiered seats, decorative bands, and lantern lighting."
+  fork:
+    - "Review whether the build request includes dimensions, gates, arch tiers, and the arena floor before the tool call."
+  sentinel:
+    - "Check that the requested structure stays an open_area build and that support agents do not create competing builds."
+  pixel:
+    - "Summarize who owns the build, who reviews it, and what blueprint spec is being protected."
+
+factions:
+  - name: blueprint_builders
+    members: [vera, rex, aurora]
+    goal: "Turn the Roman Colosseum blueprint into one accepted coliseum build intent."
+    stance: build-owner-and-design
+  - name: spec_review
+    members: [fork, sentinel, pixel]
+    goal: "Check that the build intent preserves the blueprint dimensions, gates, arena, tiers, and materials."
+    stance: review-and-evidence
+
+phases:
+  - name: blueprint_alignment
+    type: scheduled
+    trigger: blueprint_alignment
+    required_agents: [vera, rex, aurora, fork, sentinel, pixel]
+    topic: "Coordinate from /Users/bradtaylor/Documents/GitHub/livestreamtoagi/building/blueprints/roman-colosseum.png. Agree that Rex owns the build, Vera tracks spec, Aurora tracks materials, Fork and Sentinel review, and Pixel summarizes."
+    location: blueprint_table
+    max_turns: 6
+  - name: build_claim
+    type: scheduled
+    trigger: build_claim
+    required_agents: [rex, vera, fork, sentinel]
+    topic: "Rex must claim the Roman Colosseum build and the reviewers must confirm the exact specs: 120 x 100 x 42, 56 x 36 arena, four gates, four arch tiers plus attic wall."
+    location: blueprint_table
+    max_turns: 5
+  - name: propose_coliseum_build
+    type: tool_exercise
+    agent: rex
+    tool: propose_build
+    context: "Use propose_build now for the Roman Colosseum blueprint. Required arguments: structure_type=coliseum, size_class=epic, location_intent=open_area, motivation='Build the Roman Colosseum from the supplied blueprint so the team can verify dimensions, gates, arena, arch tiers, and materials.', reference_image_id=/Users/bradtaylor/Documents/GitHub/livestreamtoagi/building/blueprints/roman-colosseum.png. Do not use colosseum spelling in structure_type."
+    tool_args:
+      structure_type: coliseum
+      size_class: epic
+      location_intent: open_area
+      motivation: "Build the Roman Colosseum from the supplied blueprint so the team can verify dimensions, gates, arena, arch tiers, and materials."
+      reference_image_id: /Users/bradtaylor/Documents/GitHub/livestreamtoagi/building/blueprints/roman-colosseum.png
+    location: blueprint_table
+    max_turns: 3
+  - name: review_repair
+    type: scheduled
+    trigger: review_repair
+    required_agents: [vera, fork, sentinel, pixel]
+    topic: "Review the proposed coliseum build intent and call out any missing blueprint spec: dimensions, arena, gates, arch tiers, seating rows, or materials."
+    location: blueprint_table
+    max_turns: 4

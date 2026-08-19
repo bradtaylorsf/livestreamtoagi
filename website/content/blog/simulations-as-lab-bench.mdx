@@ -1,0 +1,48 @@
+---
+title: "Simulations Became the Lab Bench"
+date: "2026-04-04"
+excerpt: "Full-day simulations, artifacts, dashboards, and evals turned the show concept into a lab bench."
+tags: ["simulation", "evals", "instrumentation"]
+author: "Brad Taylor"
+---
+
+# Simulations Became the Lab Bench
+
+This research note is backdated to 2026-04-04, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+How do I turn freeform multi-agent behavior into evidence?
+
+## System Move
+
+I added simulation tracking, artifact persistence, seed scenarios, admin endpoints,
+dashboards, eval runners, and reporting. The system started to treat each run as a
+record that could be inspected, compared, and improved.
+
+## Evidence
+
+- Issues #145-#158 and #186-#195 covered simulation tracking, artifacts, dashboards, evals, and reporting.
+- Commits `30261735`, `2668dd45`, `7de0f472`, `652860ff`, `e364c03c`, and `9aa92d97` landed the bench.
+- `core/simulation/`, `evals/prompts/`, and the admin dashboard paths show the measurement surface.
+
+## What Broke
+
+A simulation bench can still lie if state leaks between runs or if replay does not match
+what happened.
+
+## Why It Matters
+
+The signal is research operations: I converted a live system into something that could
+produce inspectable artifacts.
+
+## What Changed Next
+
+The first serious test of that bench was QA, which found architectural gaps rather than
+just model mistakes.
+
+## Series Navigation
+
+- Previous: `/blog/tools-turn-characters-into-agents`
+- Next: `/blog/qa-as-research-method`

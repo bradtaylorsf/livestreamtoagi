@@ -1,0 +1,48 @@
+---
+title: "Every LLM Call Needs a Ledger"
+date: "2026-04-01"
+excerpt: "Autonomy without a ledger is theater; every model call needed routing, cost visibility, and safety compatibility."
+tags: ["cost-governance", "llm-routing", "autonomy"]
+author: "Brad Taylor"
+---
+
+# Every LLM Call Needs a Ledger
+
+This research note is backdated to 2026-04-01, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+What has to be true before I can let agents spend tokens continuously?
+
+## System Move
+
+I centralized LLM calls through the OpenRouter client and model config rather than
+letting call sites speak directly to providers. That gave the system one place to attach
+cost tracking, routing, observability, and later kill-switch behavior.
+
+## Evidence
+
+- Issue #5 tracked the OpenRouter LLM client work.
+- Commit `7c228e14` added the OpenRouter client with cost tracking.
+- `core/llm_client.py`, `core/model_config.py`, and `docs/model-configuration.md` define the central routing surface.
+
+## What Broke
+
+This first ledger was only the foundation. Later work had to fix double-counting,
+reconciliation, and hard caps.
+
+## Why It Matters
+
+The signal is safety judgment: cost and observability belong in the architecture before
+autonomy is scaled.
+
+## What Changed Next
+
+With model calls centralized, the next step was to make each agent an explicit
+experimental variable rather than a pile of prompts.
+
+## Series Navigation
+
+- Previous: `/blog/reproducible-agent-infrastructure`
+- Next: `/blog/agents-as-experimental-variables`

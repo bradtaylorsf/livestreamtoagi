@@ -1,0 +1,49 @@
+---
+title: "Tools Turn Characters Into Agents"
+date: "2026-04-03"
+excerpt: "Tools exposed the difference between characters that talk and agents that can change state."
+tags: ["tools", "agency", "sandboxing"]
+author: "Brad Taylor"
+---
+
+# Tools Turn Characters Into Agents
+
+This research note is backdated to 2026-04-03, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+What makes an agent more than a conversational persona?
+
+## System Move
+
+I added tool surfaces for messages, world state, audience communication, memory, code
+execution, self-modification proposals, tilemaps, revenue, web access, and Alpha
+dispatch. The point was to give agents state-changing affordances that could later be
+audited.
+
+## Evidence
+
+- Issues #35-#43 covered the first tool layer.
+- Commits #134-#142 landed core, memory, audience, sandbox, self-modification, tilemap, revenue, web, and Alpha tools.
+- `tools/` contains the action surface and the security fixes around sandboxing and self-modification.
+
+## What Broke
+
+A tool existing in the repo did not mean it was available in the production conversation
+path; QA later caught that exact gap.
+
+## Why It Matters
+
+The signal is action-surface design with security boundaries, not just giving models
+bigger prompts.
+
+## What Changed Next
+
+The next step was to run long enough simulations that tool availability and agent
+behavior could be measured.
+
+## Series Navigation
+
+- Previous: `/blog/management-before-microphones`
+- Next: `/blog/simulations-as-lab-bench`

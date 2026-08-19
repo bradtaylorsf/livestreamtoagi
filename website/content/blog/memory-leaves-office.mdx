@@ -1,0 +1,47 @@
+---
+title: "Memory Leaves the Office"
+date: "2026-05-19"
+excerpt: "Embodied agents needed the same three-tier memory semantics, not a new bridge-specific memory system."
+tags: ["memory", "embodiment", "minecraft"]
+author: "Brad Taylor"
+---
+
+# Memory Leaves the Office
+
+This research note is backdated to 2026-05-19, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+Can Minecraft agents remember through the canonical memory architecture?
+
+## System Move
+
+I exposed memory read/write paths through the bridge, preserved tool-facing parity,
+wired perception and action events into recall and archival memory, supported memory
+seeds, and added regression/performance gates.
+
+## Evidence
+
+- E5 issues #549-#555 and #658 covered memory service exposure.
+- Commits `acc1961b`, `96f0f136`, `b2bec526`, `1d662024`, `f581bb1d`, and `ce851eb5` landed the memory bridge pieces.
+- `docs/minecraft/memory-bridge-performance.md` and the epic-507 alpha-loop summary document the lesson: bridge adapters must stay thin.
+
+## What Broke
+
+Duplicating memory semantics in bridge handlers would create divergent identity between
+simulated and embodied agents.
+
+## Why It Matters
+
+The signal is architectural restraint: expose canonical managers instead of reinventing
+them at integration boundaries.
+
+## What Changed Next
+
+Memory made embodied action persistent; the next challenge was verifying action itself.
+
+## Series Navigation
+
+- Previous: `/blog/python-node-bridge`
+- Next: `/blog/verification-over-vibes`

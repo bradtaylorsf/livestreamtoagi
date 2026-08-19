@@ -1,0 +1,47 @@
+---
+title: "Retiring the Central Director"
+date: "2026-05-20"
+excerpt: "All-agent embodiment forced a rethink of centralized conversation control."
+tags: ["decentralization", "minecraft", "multi-agent"]
+author: "Brad Taylor"
+---
+
+# Retiring the Central Director
+
+This research note is backdated to 2026-05-20, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+What changes when every agent has a body instead of sharing a single simulated room?
+
+## System Move
+
+I generated profiles for all agents, mapped personalities into Minecraft, kept
+Management out of band, and tested decentralized conversation behavior. The move made
+local perception and embodied context more important than a single conversation
+scheduler.
+
+## Evidence
+
+- E8 issues #572-#580 and #706-#721 covered all-agent embodiment and decentralized conversation.
+- `docs/decisions/0004-decentralized-conversation.md` records the architectural move.
+- `docs/minecraft/personality-mapping.md`, `docs/minecraft/multi-agent-soak.md`, and the epic-510 alpha-loop summary capture the embodiment work.
+
+## What Broke
+
+Pure decentralization created coordination gaps. Bodies alone did not guarantee shared
+scene understanding.
+
+## Why It Matters
+
+The signal is willingness to retire an early architecture when the environment changes.
+
+## What Changed Next
+
+Persistent embodied autonomy raised the stakes for cost controls and kill switches.
+
+## Series Navigation
+
+- Previous: `/blog/alpha-vertical-slice`
+- Next: `/blog/autonomy-needs-kill-switch`

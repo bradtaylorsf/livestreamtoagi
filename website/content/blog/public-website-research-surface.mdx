@@ -1,0 +1,47 @@
+---
+title: "Public Website as Research Surface"
+date: "2026-04-10"
+excerpt: "The website became a research surface: agent profiles, world state, evals, conversations, and public contribution paths."
+tags: ["website", "research", "transparency"]
+author: "Brad Taylor"
+---
+
+# Public Website as Research Surface
+
+This research note is backdated to 2026-04-10, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+How do I make the project inspectable to people who are not inside the dev environment?
+
+## System Move
+
+I added public pages for agents, world state, evals, conversations, challenges,
+contributions, lore, safety, and simulations. The website started to turn internal
+artifacts into an external research record.
+
+## Evidence
+
+- Layer 10 issues #56-#68 and continuation issues #326-#331 covered the public site work.
+- Commits `be0141de`, `6fb512b7`, `14c4579b`, `61446f47`, `077e104a`, and `489fd1c1` wired real pages and APIs.
+- `website/` and `website/src/lib/blog.ts` define the publishing surface.
+
+## What Broke
+
+A public site can make weak evidence look polished if the underlying artifacts are not
+honest.
+
+## Why It Matters
+
+The signal is communication: I wanted outside readers to inspect runs, not just read
+claims.
+
+## What Changed Next
+
+To make comparisons credible, simulation state had to be isolated.
+
+## Series Navigation
+
+- Previous: `/blog/pixel-office-useful-failure`
+- Next: `/blog/simulation-isolation-counterfactuals`

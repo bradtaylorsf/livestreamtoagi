@@ -1,0 +1,47 @@
+---
+title: "QA as a Research Method"
+date: "2026-04-04"
+excerpt: "The first QA pass turned wiring bugs into research findings about where the architecture was only theoretical."
+tags: ["qa", "debugging", "research-methods"]
+author: "Brad Taylor"
+---
+
+# QA as a Research Method
+
+This research note is backdated to 2026-04-04, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+What does QA reveal when the claim is that agents can remember, talk, and use tools?
+
+## System Move
+
+The QA pass checked memory and conversation paths end to end. It moved recall and
+journal creation into the engine, wired tools into conversations, initialized memory at
+app startup, replaced dummy embeddings, and put compaction and reflection on real paths.
+
+## Evidence
+
+- Issues #168-#175 tracked the memory and conversation QA findings.
+- Commit `de94945e` consolidated the QA fixes.
+- `core/conversation_engine.py`, `core/memory/`, and `tools/` reflect the production-path wiring changes.
+
+## What Broke
+
+Many failures were construction-site failures: the right object existed, but production
+used a different path than the test harness.
+
+## Why It Matters
+
+The signal is debugging maturity: I treated QA as a way to falsify architecture claims.
+
+## What Changed Next
+
+With instrumentation in place, the evals started surfacing an uncomfortable behavioral
+failure: repetition.
+
+## Series Navigation
+
+- Previous: `/blog/simulations-as-lab-bench`
+- Next: `/blog/repetition-problem`

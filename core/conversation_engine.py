@@ -90,6 +90,7 @@ class _ActiveConversation:
         "location",
         "turn_number",
         "topics",
+        "forced_tools_consumed",
     )
 
     def __init__(
@@ -110,6 +111,7 @@ class _ActiveConversation:
         self.location = location
         self.turn_number = 0
         self.topics: list[str] = []
+        self.forced_tools_consumed: set[str] = set()
 
 
 class ConversationEngine:
@@ -1341,13 +1343,20 @@ class ConversationEngine:
         turn_used_tools = False
 
         # Resolve forced tool name once (if trigger requests a specific tool)
+        trigger_forced_tool_name: str | None = None
+        trigger_forced_tool_args: dict[str, Any] | None = None
         forced_tool_name: str | None = None
         if self._active and self._active.trigger:
             _tc_spec = self._active.trigger.get("tool_choice")
             if isinstance(_tc_spec, dict) and agent_tools:
                 _fn = _tc_spec.get("function", {}).get("name")
                 if _fn and _fn in agent_tools:
-                    forced_tool_name = _fn
+                    trigger_forced_tool_name = _fn
+                    raw_args = self._active.trigger.get("tool_args")
+                    if isinstance(raw_args, dict):
+                        trigger_forced_tool_args = dict(raw_args)
+                    if _fn not in self._active.forced_tools_consumed:
+                        forced_tool_name = _fn
 
         for _tool_round in range(MAX_TOOL_ROUNDS + 1):
             # Apply tool_choice forcing on first round only
@@ -1371,6 +1380,7 @@ class ConversationEngine:
             total_latency_ms += response.latency_ms
 
             # If we forced a tool, ensure it appears in the tool calls
+            consumed_forced_this_response = False
             if _tool_round == 0 and forced_tool_name and agent_tools:
                 from core.models import ToolCall as ToolCallModel
 
@@ -1392,7 +1402,11 @@ class ConversationEngine:
                             agent.id,
                         )
 
-                    forced_args = _FORCED_TOOL_DEFAULTS.get(forced_tool_name, {})
+                    forced_args = (
+                        trigger_forced_tool_args
+                        if trigger_forced_tool_args is not None
+                        else _FORCED_TOOL_DEFAULTS.get(forced_tool_name, {})
+                    )
                     forced_call = ToolCallModel(
                         id=f"forced_{forced_tool_name}",
                         name=forced_tool_name,
@@ -1401,8 +1415,32 @@ class ConversationEngine:
                     calls.insert(0, forced_call)
                     response.tool_calls = calls
 
+                if self._active is not None:
+                    self._active.forced_tools_consumed.add(forced_tool_name)
+                    consumed_forced_this_response = True
+
                 # Clear forced_tool_name so subsequent speakers aren't forced
                 forced_tool_name = None
+
+            if (
+                trigger_forced_tool_name
+                and not consumed_forced_this_response
+                and self._active is not None
+                and trigger_forced_tool_name in self._active.forced_tools_consumed
+                and response.tool_calls
+            ):
+                before = list(response.tool_calls)
+                response.tool_calls = [
+                    call for call in before if call.name != trigger_forced_tool_name
+                ]
+                dropped = len(before) - len(response.tool_calls)
+                if dropped:
+                    logger.warning(
+                        "Dropped %d duplicate tool_choice=%s call(s) for %s after forced call was already consumed",
+                        dropped,
+                        trigger_forced_tool_name,
+                        agent.id,
+                    )
 
             if not response.tool_calls or not agent_tools:
                 break

@@ -1,0 +1,50 @@
+---
+title: "Casting Agents as Experimental Variables"
+date: "2026-04-02"
+excerpt: "The nine-agent cast became an experimental design surface: role, personality, and model assignment were all explicit variables."
+tags: ["agents", "multi-model", "experimental-design"]
+author: "Brad Taylor"
+---
+
+# Casting Agents as Experimental Variables
+
+This research note is backdated to 2026-04-02, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+How can I make agent behavior attributable to configuration choices rather than prompt
+sprawl?
+
+## System Move
+
+I added complete configs for the agent roster and treated their role, model assignment,
+voice, and behavioral priors as data. That made Vera, Rex, Aurora, Pixel, Fork,
+Sentinel, Grok, Management, and Alpha easier to compare and later migrate into Minecraft
+profiles.
+
+## Evidence
+
+- Issues #7-#15 created the complete agent configuration files.
+- Commits #96-#106 landed the early agent configs across the roster.
+- `agents/`, `specs/CHARACTER-SHEETS.md`, and `core/model_config.py` hold the configuration surface.
+
+## What Broke
+
+A character sheet does not preserve identity by itself. Without memory and context
+assembly, even clear roles can wash out during long runs.
+
+## Why It Matters
+
+The signal is experimental design: agent differences are encoded where they can be
+inspected, changed, and evaluated.
+
+## What Changed Next
+
+The next architectural question was memory: how can an agent remain itself after the
+prompt window moves on?
+
+## Series Navigation
+
+- Previous: `/blog/llm-call-ledger`
+- Next: `/blog/three-tier-agent-memory`

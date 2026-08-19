@@ -366,6 +366,7 @@ async def _maybe_write_build_script(
             json.dumps(script.to_jsonable(), sort_keys=True, indent=2) + "\n",
             encoding="utf-8",
         )
+        _maybe_write_collaborative_build(sim_folder, script=script, source_script_path=target)
     except Exception:  # pragma: no cover - filesystem errors must not break sim
         logger.exception("failed to write build script %s", intent_id)
 
@@ -381,6 +382,33 @@ async def _maybe_write_build_script(
             await rcon_executor(script)
     except Exception:  # pragma: no cover - live RCON errors must not break sim
         logger.exception("live RCON execution failed for intent %s", intent_id)
+
+
+def _maybe_write_collaborative_build(
+    sim_folder: Path,
+    *,
+    script: Any,
+    source_script_path: Path,
+) -> None:
+    """Write role-based build jobs when collaborative build mode is enabled."""
+
+    try:
+        from core.minecraft.collaborative_build import (
+            collaborative_mode_enabled,
+            roster_from_env,
+            write_collaborative_build,
+        )
+
+        if not collaborative_mode_enabled():
+            return
+        write_collaborative_build(
+            script,
+            sim_folder=sim_folder,
+            source_script_path=source_script_path,
+            roster=roster_from_env(),
+        )
+    except Exception:  # pragma: no cover - collaboration artifacts are best-effort
+        logger.exception("failed to write collaborative build artifacts for %s", script.intent_id)
 
 
 def select_executor(

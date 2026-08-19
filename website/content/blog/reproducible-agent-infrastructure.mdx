@@ -1,0 +1,49 @@
+---
+title: "Reproducible Infrastructure for Agent Experiments"
+date: "2026-03-31"
+excerpt: "Before the agents could be interesting, the experiment needed a repeatable service substrate."
+tags: ["infrastructure", "systems", "research-methods"]
+author: "Brad Taylor"
+---
+
+# Reproducible Infrastructure for Agent Experiments
+
+This research note is backdated to 2026-03-31, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+How do I make a multi-agent experiment reproducible enough that failures can be
+attributed to the system rather than the environment?
+
+## System Move
+
+The early stack became FastAPI, Docker Compose, PostgreSQL, Redis, pgvector, and a
+Next.js website shell. I also moved the project onto Python 3.13 and nonstandard local
+ports so common developer services would not collide with the experiment.
+
+## Evidence
+
+- Issues #1, #2, and #55 covered the backend, Docker services, and website foundation.
+- Commits `6d2d3080`, `b140c858`, `31110691`, and `05148ae9` landed the core infrastructure and port corrections.
+- `AGENTS.md` now treats the nonstandard Redis, PostgreSQL, and Langfuse ports as non-negotiable.
+
+## What Broke
+
+Infrastructure did not make the agents more capable. It made their future failures less
+ambiguous.
+
+## Why It Matters
+
+The signal is systems taste: boring reproducibility decisions are part of research
+method, not scaffolding to skip.
+
+## What Changed Next
+
+Once services could run, the next invariant was that model calls had to be observable
+and governed from one path.
+
+## Series Navigation
+
+- Previous: `/blog/research-harness-not-demo`
+- Next: `/blog/llm-call-ledger`

@@ -1,0 +1,46 @@
+---
+title: "Verification Over Vibes"
+date: "2026-05-19"
+excerpt: "Embodied action required independent verification of movement, placement, perception, and failure modes."
+tags: ["verification", "embodiment", "minecraft"]
+author: "Brad Taylor"
+---
+
+# Verification Over Vibes
+
+This research note is backdated to 2026-05-19, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+How do I know a bot did something in Minecraft rather than merely reported success?
+
+## System Move
+
+The embodiment layer added curated skills, movement, observation, block placement,
+crafting/gathering categories, failure taxonomy, and Python-side verification. The
+bridge started treating action outcomes as evidence to check.
+
+## Evidence
+
+- E6 issues #556-#564 covered the embodiment action layer.
+- .alpha-loop summary `session-summary-session-epic-508-epic-e6-embodiment-action-layer.md` emphasizes independent verification.
+- `docs/minecraft/failure-taxonomy.md`, `docs/minecraft/action-command-reliability.md`, and `core/embodiment/` define the reliability surface.
+
+## What Broke
+
+Runtime success labels were not enough. The system needed to verify position, inventory,
+block mutations, and failure reasons.
+
+## Why It Matters
+
+The signal is empirical discipline: trust the world state, not the bot's narration.
+
+## What Changed Next
+
+Alpha became the first vertical slice through the whole embodied stack.
+
+## Series Navigation
+
+- Previous: `/blog/memory-leaves-office`
+- Next: `/blog/alpha-vertical-slice`

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from collections.abc import Callable
 
 from core.agents.build_intent import BuildIntent, SizeClass, StructureType
@@ -48,6 +49,11 @@ _ROOF_REGION_KEYS = ("roof", "roofing")
 _FRAME_REGION_KEYS = ("frame", "trim", "accent")
 _COLUMN_REGION_KEYS = ("columns", "column", "pillars")
 _CAPITAL_REGION_KEYS = ("capital", "capitals")
+_BASE_REGION_KEYS = ("base", "plinth", "foundation")
+_SEAT_REGION_KEYS = ("seats", "seat", "stairs", "seating")
+_BAND_REGION_KEYS = ("band", "bands", "frieze", "decorative")
+_SLAB_REGION_KEYS = ("slabs", "slab", "ledge", "ledges")
+_LIGHTING_REGION_KEYS = ("lighting", "lanterns", "lantern")
 
 
 class BuildPlanCompiler:
@@ -204,6 +210,167 @@ def _materials_manifest(commands: list[BuildCommand]) -> dict[str, int]:
             continue
         manifest[block] = manifest.get(block, 0) + command.block_count()
     return dict(sorted(manifest.items()))
+
+
+def _centered_bbox(container: BoundingBox, *, w: int, h: int) -> BoundingBox:
+    """Return a bbox centered inside ``container`` and clamped to fit."""
+    width = max(1, min(w, container.w))
+    depth = max(1, min(h, container.h))
+    return BoundingBox(
+        x=container.x + max(0, (container.w - width) // 2),
+        y=container.y + max(0, (container.h - depth) // 2),
+        w=width,
+        h=depth,
+    )
+
+
+def _inset_bbox(bbox: BoundingBox, inset: int) -> BoundingBox:
+    clamped = max(0, inset)
+    return BoundingBox(
+        x=bbox.x + clamped,
+        y=bbox.y + clamped,
+        w=max(1, bbox.w - 2 * clamped),
+        h=max(1, bbox.h - 2 * clamped),
+    )
+
+
+def _ellipse_span_at_z(bbox: BoundingBox, z: int) -> tuple[int, int] | None:
+    """Return inclusive relative x-span for an ellipse row at relative z."""
+    if z < bbox.y or z >= bbox.y + bbox.h:
+        return None
+    if bbox.w <= 1 or bbox.h <= 1:
+        return (bbox.x, bbox.x)
+    rx = bbox.w / 2.0
+    rz = bbox.h / 2.0
+    cx = bbox.x + (bbox.w - 1) / 2.0
+    cz = bbox.y + (bbox.h - 1) / 2.0
+    normalized_z = (z - cz) / rz if rz else 0.0
+    inside = 1.0 - normalized_z * normalized_z
+    if inside < 0:
+        return None
+    half_width = rx * math.sqrt(max(0.0, inside))
+    return (math.ceil(cx - half_width), math.floor(cx + half_width))
+
+
+def _ellipse_disk(
+    *,
+    bbox: BoundingBox,
+    origin: Position3D,
+    base_y: int,
+    height: int,
+    material: str,
+) -> list[BuildCommand]:
+    commands: list[BuildCommand] = []
+    if height <= 0:
+        return commands
+    top_y = base_y + height - 1
+    for z in range(bbox.y, bbox.y + bbox.h):
+        span = _ellipse_span_at_z(bbox, z)
+        if span is None:
+            continue
+        x0, x1 = span
+        commands.append(
+            BuildCommand(
+                kind="fill",
+                position=Position3D(x=origin.x + x0, y=base_y, z=origin.z + z),
+                region_to=Position3D(x=origin.x + x1, y=top_y, z=origin.z + z),
+                block_type=material,
+            )
+        )
+    return commands
+
+
+def _ellipse_ring(
+    *,
+    outer: BoundingBox,
+    inner: BoundingBox,
+    origin: Position3D,
+    base_y: int,
+    height: int,
+    material: str,
+) -> list[BuildCommand]:
+    """Build an oval ring by subtracting the inner ellipse row span."""
+    commands: list[BuildCommand] = []
+    if height <= 0:
+        return commands
+    top_y = base_y + height - 1
+    for z in range(outer.y, outer.y + outer.h):
+        outer_span = _ellipse_span_at_z(outer, z)
+        if outer_span is None:
+            continue
+        inner_span = _ellipse_span_at_z(inner, z)
+        segments: list[tuple[int, int]]
+        if inner_span is None:
+            segments = [outer_span]
+        else:
+            ox0, ox1 = outer_span
+            ix0, ix1 = inner_span
+            segments = []
+            if ox0 <= ix0 - 1:
+                segments.append((ox0, ix0 - 1))
+            if ix1 + 1 <= ox1:
+                segments.append((ix1 + 1, ox1))
+        for x0, x1 in segments:
+            commands.append(
+                BuildCommand(
+                    kind="fill",
+                    position=Position3D(x=origin.x + x0, y=base_y, z=origin.z + z),
+                    region_to=Position3D(x=origin.x + x1, y=top_y, z=origin.z + z),
+                    block_type=material,
+                )
+            )
+    return commands
+
+
+def _air_fill(
+    commands: list[BuildCommand],
+    *,
+    origin: Position3D,
+    x0: int,
+    y0: int,
+    z0: int,
+    x1: int,
+    y1: int,
+    z1: int,
+) -> None:
+    commands.append(
+        BuildCommand(
+            kind="fill",
+            position=Position3D(x=origin.x + min(x0, x1), y=min(y0, y1), z=origin.z + min(z0, z1)),
+            region_to=Position3D(
+                x=origin.x + max(x0, x1),
+                y=max(y0, y1),
+                z=origin.z + max(z0, z1),
+            ),
+            block_type="air",
+        )
+    )
+
+
+def _material_fill(
+    commands: list[BuildCommand],
+    *,
+    origin: Position3D,
+    x0: int,
+    y0: int,
+    z0: int,
+    x1: int,
+    y1: int,
+    z1: int,
+    material: str,
+) -> None:
+    commands.append(
+        BuildCommand(
+            kind="fill",
+            position=Position3D(x=origin.x + min(x0, x1), y=min(y0, y1), z=origin.z + min(z0, z1)),
+            region_to=Position3D(
+                x=origin.x + max(x0, x1),
+                y=max(y0, y1),
+                z=origin.z + max(z0, z1),
+            ),
+            block_type=material,
+        )
+    )
 
 
 def _hash_plan(plan: BuildPlan, *, origin: Position3D, seed: int) -> str:
@@ -504,60 +671,350 @@ def _recipe_coliseum(
     materials: dict[str, str],
     seed: int,
 ) -> tuple[list[BuildCommand], list[str]]:
-    # Outer wall + tiered seating modelled as concentric perimeters
-    # shrinking inward, plus columns/arches from key_features.
+    # Roman Colosseum blueprint recipe: a full-scale oval amphitheater
+    # with 120 x 100 footprint, 42-block height, four arcade tiers,
+    # a solid attic wall, 56 x 36 arena floor, four main gates, and
+    # tiered seating rows. Smaller test plans use the same proportions.
     commands: list[BuildCommand] = []
     bbox = _bbox_for_level(plan)
-    floor_material = _pick(materials, _FLOOR_REGION_KEYS)
+    arena_material = materials.get("arena") or _pick(materials, _FLOOR_REGION_KEYS)
+    base_material = _pick(materials, _BASE_REGION_KEYS + _WALL_REGION_KEYS)
     wall_material = _pick(materials, _WALL_REGION_KEYS)
+    seat_material = _pick(materials, _SEAT_REGION_KEYS + _FLOOR_REGION_KEYS)
+    band_material = _pick(materials, _BAND_REGION_KEYS + _WALL_REGION_KEYS)
+    trim_material = _pick(materials, _FRAME_REGION_KEYS + _SLAB_REGION_KEYS)
+    lighting_material = _pick(materials, _LIGHTING_REGION_KEYS + _FRAME_REGION_KEYS)
+
+    large_blueprint_scale = bbox.w >= 80 and bbox.h >= 60
+    base_height = 6 if large_blueprint_scale else max(2, min(bbox.w, bbox.h) // 8)
+    tier_heights = _coliseum_tier_heights(plan, large_blueprint_scale=large_blueprint_scale)
+    arch_tier_heights = tier_heights[:4]
+    attic_height = tier_heights[4]
+    arch_opening_height = 7 if large_blueprint_scale else max(2, min(tier_heights[0], 4))
+    wall_thickness = 5 if large_blueprint_scale else max(1, min(bbox.w, bbox.h) // 8)
 
     floor_y = origin.y
-    # Sand floor of the arena.
-    commands.extend(
-        foundation_lay(bbox=bbox, origin=origin, floor_y=floor_y, material=floor_material)
+    wall_base_y = floor_y + base_height
+    wall_top_y = wall_base_y + sum(arch_tier_heights) + attic_height - 1
+
+    shell_inner = _inset_bbox(bbox, wall_thickness)
+    arena_bbox = (
+        _centered_bbox(bbox, w=56, h=36)
+        if large_blueprint_scale
+        else _centered_bbox(bbox, w=max(4, bbox.w // 2), h=max(4, bbox.h // 2))
     )
 
-    # Tiered seating rings.
-    tiers = max(1, min(8, min(bbox.w, bbox.h) // 4))
-    for tier in range(tiers):
-        inset = tier
-        tier_bbox = BoundingBox(
-            x=bbox.x + inset,
-            y=bbox.y + inset,
-            w=max(1, bbox.w - 2 * inset),
-            h=max(1, bbox.h - 2 * inset),
+    # Arena floor plus the footprint plinth.
+    commands.extend(
+        _ellipse_disk(
+            bbox=arena_bbox,
+            origin=origin,
+            base_y=floor_y,
+            height=1,
+            material=arena_material,
         )
-        if tier_bbox.w < 2 or tier_bbox.h < 2:
-            break
+    )
+    commands.extend(
+        _ellipse_ring(
+            outer=bbox,
+            inner=arena_bbox,
+            origin=origin,
+            base_y=floor_y,
+            height=base_height,
+            material=base_material,
+        )
+    )
+
+    # Outer amphitheater shell, then horizontal decorative bands at each tier.
+    commands.extend(
+        _ellipse_ring(
+            outer=bbox,
+            inner=shell_inner,
+            origin=origin,
+            base_y=wall_base_y,
+            height=wall_top_y - wall_base_y + 1,
+            material=wall_material,
+        )
+    )
+
+    band_y = wall_base_y
+    for height in arch_tier_heights:
+        band_y += height
         commands.extend(
-            wall_segment(
-                bbox=tier_bbox,
+            _ellipse_ring(
+                outer=bbox,
+                inner=shell_inner,
                 origin=origin,
-                base_y=floor_y + 1 + tier,
-                height=2,
-                material=wall_material,
+                base_y=band_y - 1,
+                height=1,
+                material=band_material,
+            )
+        )
+    commands.extend(
+        _ellipse_ring(
+            outer=bbox,
+            inner=shell_inner,
+            origin=origin,
+            base_y=wall_top_y,
+            height=1,
+            material=trim_material,
+        )
+    )
+
+    _carve_coliseum_arches(
+        commands,
+        bbox=bbox,
+        origin=origin,
+        base_y=wall_base_y,
+        tier_heights=arch_tier_heights,
+        wall_thickness=wall_thickness,
+        opening_height=arch_opening_height,
+        opening_width=5 if large_blueprint_scale else max(2, bbox.w // 8),
+        spacing=8 if large_blueprint_scale else max(4, bbox.w // 6),
+    )
+    _carve_coliseum_gates(
+        commands,
+        bbox=bbox,
+        origin=origin,
+        floor_y=floor_y,
+        wall_thickness=wall_thickness,
+        gate_width=10 if large_blueprint_scale else max(3, min(bbox.w, bbox.h) // 5),
+        gate_height=12 if large_blueprint_scale else base_height + arch_opening_height,
+    )
+
+    # Twenty-four seating rows in four tiers around the central arena.
+    seat_rows = 24 if large_blueprint_scale else max(4, min(bbox.w, bbox.h) // 2)
+    max_available_rows = max(
+        1,
+        min(
+            (arena_bbox.x - bbox.x) - wall_thickness,
+            (arena_bbox.y - bbox.y) - wall_thickness,
+        ),
+    )
+    seat_rows = min(seat_rows, max_available_rows)
+    for row in range(seat_rows):
+        outer = BoundingBox(
+            x=arena_bbox.x - row - 1,
+            y=arena_bbox.y - row - 1,
+            w=arena_bbox.w + 2 * (row + 1),
+            h=arena_bbox.h + 2 * (row + 1),
+        )
+        inner = BoundingBox(
+            x=arena_bbox.x - row,
+            y=arena_bbox.y - row,
+            w=arena_bbox.w + 2 * row,
+            h=arena_bbox.h + 2 * row,
+        )
+        commands.extend(
+            _ellipse_ring(
+                outer=outer,
+                inner=inner,
+                origin=origin,
+                base_y=floor_y + 1 + row,
+                height=1,
+                material=seat_material,
             )
         )
 
-    # Interior rooms (gladiator quarters, etc.).
-    for room in _sorted_rooms(plan):
-        commands.extend(
-            wall_segment(
-                bbox=room.relative_bbox,
-                origin=Position3D(
-                    x=origin.x + bbox.x,
-                    y=origin.y,
-                    z=origin.z + bbox.y,
-                ),
-                base_y=floor_y + 1,
-                height=3,
-                material=wall_material,
-            )
-        )
+    _add_coliseum_lanterns(
+        commands,
+        bbox=bbox,
+        origin=origin,
+        floor_y=floor_y,
+        material=lighting_material,
+    )
 
     extra_cmds, invoked = _emit_key_features(plan, origin=origin, materials=materials)
     commands.extend(extra_cmds)
-    return commands, invoked
+    return commands, [
+        "ellipse_disk",
+        "ellipse_ring",
+        "coliseum_arcade",
+        "coliseum_gates",
+        "coliseum_seating",
+        *invoked,
+    ]
+
+
+def _coliseum_tier_heights(
+    plan: BuildPlan,
+    *,
+    large_blueprint_scale: bool,
+) -> list[int]:
+    levels = [max(1, lvl.height_blocks) for lvl in _sorted_levels(plan)]
+    if len(levels) >= 5:
+        return levels[:5]
+    return [8, 8, 8, 6, 6] if large_blueprint_scale else [2, 2, 2, 2, 2]
+
+
+def _carve_coliseum_arches(
+    commands: list[BuildCommand],
+    *,
+    bbox: BoundingBox,
+    origin: Position3D,
+    base_y: int,
+    tier_heights: list[int],
+    wall_thickness: int,
+    opening_height: int,
+    opening_width: int,
+    spacing: int,
+) -> None:
+    x0 = bbox.x
+    x1 = bbox.x + bbox.w - 1
+    z0 = bbox.y
+    z1 = bbox.y + bbox.h - 1
+    spacing = max(opening_width + 1, spacing)
+
+    level_y = base_y
+    for tier_height in tier_heights:
+        open_y0 = level_y + 1
+        open_y1 = min(level_y + tier_height - 1, open_y0 + opening_height - 1)
+
+        for x in range(x0 + spacing, x1 - spacing, spacing):
+            arch_x1 = min(x + opening_width - 1, x1 - wall_thickness - 1)
+            if arch_x1 <= x:
+                continue
+            _air_fill(
+                commands,
+                origin=origin,
+                x0=x,
+                y0=open_y0,
+                z0=z0,
+                x1=arch_x1,
+                y1=open_y1,
+                z1=z0 + wall_thickness - 1,
+            )
+            _air_fill(
+                commands,
+                origin=origin,
+                x0=x,
+                y0=open_y0,
+                z0=z1 - wall_thickness + 1,
+                x1=arch_x1,
+                y1=open_y1,
+                z1=z1,
+            )
+
+        for z in range(z0 + spacing, z1 - spacing, spacing):
+            arch_z1 = min(z + opening_width - 1, z1 - wall_thickness - 1)
+            if arch_z1 <= z:
+                continue
+            _air_fill(
+                commands,
+                origin=origin,
+                x0=x0,
+                y0=open_y0,
+                z0=z,
+                x1=x0 + wall_thickness - 1,
+                y1=open_y1,
+                z1=arch_z1,
+            )
+            _air_fill(
+                commands,
+                origin=origin,
+                x0=x1 - wall_thickness + 1,
+                y0=open_y0,
+                z0=z,
+                x1=x1,
+                y1=open_y1,
+                z1=arch_z1,
+            )
+        level_y += tier_height
+
+
+def _carve_coliseum_gates(
+    commands: list[BuildCommand],
+    *,
+    bbox: BoundingBox,
+    origin: Position3D,
+    floor_y: int,
+    wall_thickness: int,
+    gate_width: int,
+    gate_height: int,
+) -> None:
+    x0 = bbox.x
+    x1 = bbox.x + bbox.w - 1
+    z0 = bbox.y
+    z1 = bbox.y + bbox.h - 1
+    cx = (x0 + x1) // 2
+    cz = (z0 + z1) // 2
+    half = max(1, gate_width // 2)
+    y1 = floor_y + gate_height - 1
+
+    _air_fill(
+        commands,
+        origin=origin,
+        x0=cx - half,
+        y0=floor_y,
+        z0=z0,
+        x1=cx + half,
+        y1=y1,
+        z1=z0 + wall_thickness - 1,
+    )
+    _air_fill(
+        commands,
+        origin=origin,
+        x0=cx - half,
+        y0=floor_y,
+        z0=z1 - wall_thickness + 1,
+        x1=cx + half,
+        y1=y1,
+        z1=z1,
+    )
+    _air_fill(
+        commands,
+        origin=origin,
+        x0=x0,
+        y0=floor_y,
+        z0=cz - half,
+        x1=x0 + wall_thickness - 1,
+        y1=y1,
+        z1=cz + half,
+    )
+    _air_fill(
+        commands,
+        origin=origin,
+        x0=x1 - wall_thickness + 1,
+        y0=floor_y,
+        z0=cz - half,
+        x1=x1,
+        y1=y1,
+        z1=cz + half,
+    )
+
+
+def _add_coliseum_lanterns(
+    commands: list[BuildCommand],
+    *,
+    bbox: BoundingBox,
+    origin: Position3D,
+    floor_y: int,
+    material: str,
+) -> None:
+    x0 = bbox.x
+    x1 = bbox.x + bbox.w - 1
+    z0 = bbox.y
+    z1 = bbox.y + bbox.h - 1
+    cx = (x0 + x1) // 2
+    cz = (z0 + z1) // 2
+    y = floor_y + 1
+    for x, z in (
+        (cx, z0 + 2),
+        (cx, z1 - 2),
+        (x0 + 2, cz),
+        (x1 - 2, cz),
+    ):
+        _material_fill(
+            commands,
+            origin=origin,
+            x0=x,
+            y0=y,
+            z0=z,
+            x1=x,
+            y1=y,
+            z1=z,
+            material=material,
+        )
 
 
 def _recipe_market(

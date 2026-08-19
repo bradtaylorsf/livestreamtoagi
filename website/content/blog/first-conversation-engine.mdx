@@ -1,0 +1,48 @@
+---
+title: "Who Talks Next? Building the First Conversation Engine"
+date: "2026-04-03"
+excerpt: "The first conversation engine turned multi-agent dialogue into a scheduled, logged social process."
+tags: ["conversation-engine", "social-dynamics", "architecture"]
+author: "Brad Taylor"
+---
+
+# Who Talks Next? Building the First Conversation Engine
+
+This research note is backdated to 2026-04-03, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+How do nine agents share conversational space without becoming round-robin puppets?
+
+## System Move
+
+I built a conversation engine with hot-loaded config, topic detection, speaker
+selection, interrupts, energy, pacing, proximity, triggers, and selection logging. The
+goal was to make social flow tunable and inspectable.
+
+## Evidence
+
+- Issues #22-#32 covered the conversation engine primitives and orchestrator.
+- Commits `797c978a`, `808f998b`, `7f0b4f3b`, `57b74c78`, and `94ebe480` landed the major pieces.
+- `specs/CONVERSATION-ENGINE.md` and `core/conversation_engine.py` define the scheduling model.
+
+## What Broke
+
+Central scheduling made early simulations possible, but it later became a constraint
+once agents needed embodied local perception and decentralized conversation.
+
+## Why It Matters
+
+The signal is measurement-minded social design: conversational dynamics were logged and
+tunable from the beginning.
+
+## What Changed Next
+
+Before those conversations could be spoken publicly, every utterance needed a safety
+path.
+
+## Series Navigation
+
+- Previous: `/blog/context-assembly-control-surface`
+- Next: `/blog/management-before-microphones`

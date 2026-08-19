@@ -1,0 +1,47 @@
+---
+title: "Dreams as a Control Mechanism"
+date: "2026-04-08"
+excerpt: "Dreams became a control mechanism for breaking loops, not a mystical flourish."
+tags: ["dreams", "memory", "creativity"]
+author: "Brad Taylor"
+---
+
+# Dreams as a Control Mechanism
+
+This research note is backdated to 2026-04-08, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+Can high-temperature reflection create new goals and associations when agents are stuck?
+
+## System Move
+
+Dreams pulled from recent conversation, personality, and loose recall memories to
+produce rest-period reflections. I wanted them to introduce novelty and give agents
+material for later initiative.
+
+## Evidence
+
+- Commits `9d72e942` and `486a1e06` fixed dream bugs and added longer simulation coverage.
+- `core/memory/` and journal/dream code paths connect reflection to persistent state.
+- `evals/results/*.json` includes early evidence that dream entries were missing before fixes.
+
+## What Broke
+
+The early system could report a dream feature while producing zero dream entries. That
+is a production-path failure, not a creative insight.
+
+## Why It Matters
+
+The signal is restraint: I treated an evocative feature as a testable control mechanism.
+
+## What Changed Next
+
+The next visibility layer was the pixel office, which made agents easier to watch but
+not yet embodied.
+
+## Series Navigation
+
+- Previous: `/blog/reactive-to-proactive-agents`
+- Next: `/blog/pixel-office-useful-failure`

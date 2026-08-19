@@ -470,6 +470,9 @@ class PhaseRunner:
             "location": phase.config.get("location", "town_square"),
             "tool_choice": {"type": "function", "function": {"name": tool_name}},
         }
+        tool_args = phase.config.get("tool_args")
+        if isinstance(tool_args, dict):
+            trigger["tool_args"] = dict(tool_args)
 
         # Override max_turns for tool exercises — keep them short
         if "max_turns" not in phase.config:

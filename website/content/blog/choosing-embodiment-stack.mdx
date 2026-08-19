@@ -1,0 +1,46 @@
+---
+title: "Choosing the Embodiment Stack"
+date: "2026-05-17"
+excerpt: "The embodiment stack was chosen through decision records, not enthusiasm."
+tags: ["minecraft", "architecture", "decisions"]
+author: "Brad Taylor"
+---
+
+# Choosing the Embodiment Stack
+
+This research note is backdated to 2026-05-17, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+Which Minecraft stack gives agents a live world while staying maintainable?
+
+## System Move
+
+The decision records selected Paper, a pinned Mindcraft path, Mineflayer, Node, Java,
+offline development auth, OBS capture expectations, and licensing/hosting constraints.
+
+## Evidence
+
+- Commit `427e658f` recorded the Minecraft pivot decisions.
+- `docs/decisions/0000-summary.md` through `docs/decisions/0007-licensing.md` capture the stack choices.
+- Issues #518-#524 and `docs/minecraft/server-setup.md` define early launch gates.
+
+## What Broke
+
+Every dependency choice created an integration boundary: Java server ops, Node bot
+control, Python orchestration, and video capture all had to agree.
+
+## Why It Matters
+
+The signal is ADR discipline: fast pivots still need written constraints.
+
+## What Changed Next
+
+With the stack chosen, I needed a Mindcraft fork that served this project rather than
+swallowing it.
+
+## Series Navigation
+
+- Previous: `/blog/minecraft-pivot`
+- Next: `/blog/forking-mindcraft`

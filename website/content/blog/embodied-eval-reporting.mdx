@@ -1,0 +1,45 @@
+---
+title: "Adapting Evals to Embodied Worlds"
+date: "2026-05-25"
+excerpt: "The eval system had to understand embodied events and build verification, not only dialogue."
+tags: ["evals", "embodiment", "reporting"]
+author: "Brad Taylor"
+---
+
+# Adapting Evals to Embodied Worlds
+
+This research note is backdated to 2026-05-25, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+How should the evaluation suite change when agents act in a physical world?
+
+## System Move
+
+I added embodied event loaders, build-verification categories, existing suite
+preservation, run-mode scorecards, regression gates, and build-quality feedback.
+
+## Evidence
+
+- E10 issues #587-#593 and #714 covered embodied eval reporting.
+- Commits `c559fab7`, `ca78b3ab`, `fb2f7029`, `af6be0a6`, and `3b670f48` landed the work.
+- `docs/eval-embodied.md` and `evals/prompts/build_verification.yaml` define the embodied eval additions.
+
+## What Broke
+
+Dialogue categories alone can miss the central question: did the world change in the
+intended way?
+
+## Why It Matters
+
+The signal is metric evolution as the system's action space changes.
+
+## What Changed Next
+
+The next foundation was a run-mode system that could vary starting conditions.
+
+## Series Navigation
+
+- Previous: `/blog/preserving-dreams-journals-embodiment`
+- Next: `/blog/run-modes-starting-conditions`

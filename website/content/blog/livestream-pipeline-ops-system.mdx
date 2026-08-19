@@ -1,0 +1,46 @@
+---
+title: "A Livestream Pipeline Is an Ops System"
+date: "2026-05-21"
+excerpt: "The livestream pipeline is an operations system, not a media accessory."
+tags: ["livestream", "ops", "reliability"]
+author: "Brad Taylor"
+---
+
+# A Livestream Pipeline Is an Ops System
+
+This research note is backdated to 2026-05-21, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+What has to be reliable for a 24/7 agent world to be public?
+
+## System Move
+
+I added capture prototypes, encoder/RTMP push, overlays, TTS audio routing, stream
+resilience, stream kill path, health monitoring, alerting, and runbooks.
+
+## Evidence
+
+- E13 issues #609-#616 covered the livestream pipeline.
+- Commits `bf7a6cc7`, `fddabc29`, `22b35eb7`, `571dbd5c`, `20eeb4fd`, `59aadebf`, and `cc72037a` landed the pipeline.
+- `docs/livestream/` and the epic-515 alpha-loop summary define the operational surface.
+
+## What Broke
+
+Streaming failures often show up as environment problems: missing devices, encoder
+drift, readiness timing, or stale credentials.
+
+## Why It Matters
+
+The signal is reliability thinking: public research systems need operator runbooks.
+
+## What Changed Next
+
+The next coordination layer came from a surprising place: reintroducing direction, but
+with evidence.
+
+## Series Navigation
+
+- Previous: `/blog/autonomy-needs-kill-switch`
+- Next: `/blog/director-v2-evidence-coordination`

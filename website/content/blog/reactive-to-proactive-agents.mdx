@@ -1,0 +1,48 @@
+---
+title: "Making Reactive Agents Proactive"
+date: "2026-04-08"
+excerpt: "The autonomy diagnosis reframed agency as a state problem, not a smarter-model problem."
+tags: ["autonomy", "agency", "agent-state"]
+author: "Brad Taylor"
+---
+
+# Making Reactive Agents Proactive
+
+This research note is backdated to 2026-04-08, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+Why do capable models still sit still until prompted?
+
+## System Move
+
+I added internal state, initiative, autonomous goals, individual budgets, factions,
+events, and dream mechanics. The architecture started to give agents changing pressures
+that could surface without a direct human prompt.
+
+## Evidence
+
+- Issues #267-#275 tracked the autonomy and internal economy work.
+- Commits `f5499c7d`, `d68477ac`, `02648bc3`, `2b5927d9`, and `285ea65f` landed the system.
+- `specs/AGENT-AUTONOMY-EVAL-STRATEGY.md` diagnoses reactivity, statelessness, and budget flattening.
+
+## What Broke
+
+Proactivity can create activity without collaboration. Later embodied evals had to
+separate motion from coordinated progress.
+
+## Why It Matters
+
+The signal is diagnosis: I traced a behavioral failure to missing state machinery and
+added measurable mechanisms.
+
+## What Changed Next
+
+The first mechanism to revisit was dreams, which had to become concrete rather than
+decorative.
+
+## Series Navigation
+
+- Previous: `/blog/first-evolution-loop`
+- Next: `/blog/dreams-as-control-mechanism`

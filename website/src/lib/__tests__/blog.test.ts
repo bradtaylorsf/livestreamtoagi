@@ -34,9 +34,9 @@ describe("blog", () => {
 
   describe("getPostBySlug", () => {
     it("returns a post with content", () => {
-      const post = getPostBySlug("why-agi-is-tongue-in-cheek");
+      const post = getPostBySlug("research-harness-not-demo");
       expect(post).not.toBeNull();
-      expect(post!.title).toContain("Tongue-in-Cheek");
+      expect(post!.title).toContain("Research Harness");
       expect(post!.content).toBeTruthy();
     });
 

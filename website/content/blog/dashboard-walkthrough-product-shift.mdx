@@ -1,0 +1,46 @@
+---
+title: "The Dashboard Walkthrough That Changed the Product"
+date: "2026-05-07"
+excerpt: "A dashboard QA walkthrough pushed the system toward simulations as the product surface."
+tags: ["dashboard", "simulation", "product"]
+author: "Brad Taylor"
+---
+
+# The Dashboard Walkthrough That Changed the Product
+
+This research note is backdated to 2026-05-07, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+What does a researcher need to inspect after a run finishes?
+
+## System Move
+
+The dashboard work added clearer world chunks, recent events, simulation pickers, lore
+explanations, backfilled snapshot dates, and UI fixes. It made the simulation record
+easier to navigate and less dependent on raw logs.
+
+## Evidence
+
+- Epic 417 issues #395-#416 covered the admin dashboard QA walkthrough.
+- Commits `955e7f5b`, `7e6d2322`, `9ee4497e`, `cf3726fe`, and `6c1f5e68` landed the fixes and merge.
+- .alpha-loop learnings for epic 417 capture the QA-driven product shift.
+
+## What Broke
+
+A dashboard can make gaps visible but cannot fill them; several pages still depended on
+whether simulations produced meaningful artifacts.
+
+## Why It Matters
+
+The signal is product taste for research systems: evidence has to be browsable.
+
+## What Changed Next
+
+The next pivot made that explicit: simulations became the primary product.
+
+## Series Navigation
+
+- Previous: `/blog/token-bloat-memory-compaction`
+- Next: `/blog/simulation-first-pivot`

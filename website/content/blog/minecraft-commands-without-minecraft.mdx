@@ -1,0 +1,46 @@
+---
+title: "Testing Minecraft Commands Without Minecraft"
+date: "2026-05-23"
+excerpt: "The E17 command harness tested Minecraft command generation before risking live-world execution."
+tags: ["minecraft", "evals", "commands"]
+author: "Brad Taylor"
+---
+
+# Testing Minecraft Commands Without Minecraft
+
+This research note is backdated to 2026-05-23, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+Can command understanding be evaluated before a bot touches the world?
+
+## System Move
+
+I built a text-only harness with command schema extraction, skill cards, fixture
+generation, provider runner, parser, semantic evaluator, report artifacts, package
+scripts, docs, and regression tests.
+
+## Evidence
+
+- E17 issues #777-#783 covered the text-only Minecraft command eval harness.
+- Commits `abceb0fd`, `313dae0f`, `d6cb92f2`, `b7f84203`, and `37659c78` landed the harness.
+- `docs/minecraft/command-eval.md` and the epic-772 alpha-loop summary define the eval flow.
+
+## What Broke
+
+Text-only correctness does not prove live-world reliability. It only reduces the
+category of errors that reach Minecraft.
+
+## Why It Matters
+
+The signal is staged evaluation: test contracts before expensive or stateful execution.
+
+## What Changed Next
+
+The next step was replaying passing command artifacts in a live flat world.
+
+## Series Navigation
+
+- Previous: `/blog/director-v2-evidence-coordination`
+- Next: `/blog/flat-world-live-evals`

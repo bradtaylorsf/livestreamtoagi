@@ -1,0 +1,47 @@
+---
+title: "Streaming BuildScripts Into a Live World"
+date: "2026-05-27"
+excerpt: "BuildScripts started streaming into a live Minecraft world through RCON, with failures surfaced instead of skipped."
+tags: ["minecraft", "rcon", "buildscripts"]
+author: "Brad Taylor"
+---
+
+# Streaming BuildScripts Into a Live World
+
+This research note is backdated to 2026-05-27, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+What changes when the build plan touches a live server?
+
+## System Move
+
+I wired `propose_build` through the embodied path to stream BuildScripts via RCON, fixed
+async MCRcon behavior, increased throttling for multi-fill commands, guaranteed wall
+spans, and connected the compiler/catalog resolver into the headless executor.
+
+## Evidence
+
+- Commits `b6ed368d`, `2ad9d974`, `1dae306f`, `c2425af2`, `ac89bac5`, and `5cb4d57a` landed live BuildScript streaming.
+- Issues #885-#888 covered async RCON, throttle, compiler walls, and executor wiring.
+- `core/minecraft/`, `core/embodiment/`, and `docs/MINECRAFT-REPLAY.md` define the live build path.
+
+## What Broke
+
+Bridge failures cannot be silent in a live world; otherwise the agent appears to have
+acted when nothing changed.
+
+## Why It Matters
+
+The signal is production hardening for embodied action pipelines.
+
+## What Changed Next
+
+Once agents could build, the next question was social infrastructure: ownership, trade,
+theft, diplomacy, and conflict.
+
+## Series Navigation
+
+- Previous: `/blog/build-intent-to-build-script`
+- Next: `/blog/civilization-mechanics-social-infrastructure`

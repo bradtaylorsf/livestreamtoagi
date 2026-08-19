@@ -1,0 +1,46 @@
+---
+title: "From Build Intent to Build Script"
+date: "2026-05-26"
+excerpt: "BuildIntent and BuildPlanCompiler turned agent build proposals into executable Minecraft actions."
+tags: ["minecraft", "buildscripts", "compiler"]
+author: "Brad Taylor"
+---
+
+# From Build Intent to Build Script
+
+This research note is backdated to 2026-05-26, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+How does an agent's build idea become blocks in the world?
+
+## System Move
+
+I added structured BuildIntent, a reference-image library, BuildPlan decomposition,
+skill-card macro compilation, RCON execution paths, screenshot capture, refinement
+wiring, and build-quality scoring.
+
+## Evidence
+
+- E22 issues #855-#858 and #871-#876 covered BuildIntent, compiler, RCON execution, screenshots, and scoring.
+- Commits `ae463a7a`, `038bcf5c`, `7597bc97`, `cf58e83f`, `2aa6a589`, `d107efcb`, `27462f92`, and `286c46f6` landed the work.
+- `core/minecraft/`, `scripts/replay_in_minecraft.py`, and `docs/MINECRAFT-REPLAY.md` define the compiler and replay paths.
+
+## What Broke
+
+A compiler can produce plausible instructions that fail structurally in-world, such as
+hollow walls or openings carved in the wrong order.
+
+## Why It Matters
+
+The signal is compiler-minded tool design for agent action.
+
+## What Changed Next
+
+The next milestone was streaming those BuildScripts into a live server.
+
+## Series Navigation
+
+- Previous: `/blog/headless-sim-minecraft-replay`
+- Next: `/blog/streaming-buildscripts-live-world`

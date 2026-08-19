@@ -1,0 +1,47 @@
+---
+title: "Forking Mindcraft Without Losing the Thesis"
+date: "2026-05-18"
+excerpt: "The Mindcraft fork had to be reproducible, minimal, and subordinate to the research thesis."
+tags: ["mindcraft", "minecraft", "model-routing"]
+author: "Brad Taylor"
+---
+
+# Forking Mindcraft Without Losing the Thesis
+
+This research note is backdated to 2026-05-18, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+How do I use an existing Minecraft agent stack without losing control of model routing
+and profile semantics?
+
+## System Move
+
+I pinned a fork, verified install, connected a stock bot, mapped model assignments into
+profile schema, stripped unused features, and documented upstream-merge policy.
+
+## Evidence
+
+- E3 issues #533-#539 tracked the Mindcraft fork evaluation.
+- Commits `a9cedf41`, `f0eb5878`, `f7bdaeed`, `dfc7b9b7`, and `38820654` landed the fork work.
+- `docs/minecraft/mindcraft-fork.md`, `docs/minecraft/model-routing.md`, and the epic-505 alpha-loop summary document the choices.
+
+## What Broke
+
+A fork can become a second product. I had to keep divergence small and generated from
+the canonical agent config.
+
+## Why It Matters
+
+The signal is integration discipline: reuse the runtime without surrendering the
+experiment design.
+
+## What Changed Next
+
+Next came the bridge between Minecraft bodies and the Python brain.
+
+## Series Navigation
+
+- Previous: `/blog/choosing-embodiment-stack`
+- Next: `/blog/python-node-bridge`

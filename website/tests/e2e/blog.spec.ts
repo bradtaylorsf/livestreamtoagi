@@ -9,21 +9,17 @@ test.describe("Blog", () => {
     ).toBeVisible();
 
     // At least one post should be visible
-    await expect(
-      page.getByText(/Tongue-in-Cheek/i).first(),
-    ).toBeVisible();
+    await expect(page.getByText(/Research Harness/i).first()).toBeVisible();
 
     // Tag filter bar should be visible
     await expect(page.getByTestId("tag-filter")).toBeVisible();
   });
 
   test("individual post renders from MDX", async ({ page }) => {
-    await page.goto("/blog/why-agi-is-tongue-in-cheek");
+    await page.goto("/blog/research-harness-not-demo");
 
     // Post title
-    await expect(
-      page.getByText(/Tongue-in-Cheek/i).first(),
-    ).toBeVisible();
+    await expect(page.getByText(/Research Harness/i).first()).toBeVisible();
 
     // Author and date
     await expect(page.getByText("Brad Taylor")).toBeVisible();
@@ -34,23 +30,21 @@ test.describe("Blog", () => {
     ).toBeVisible();
 
     // MDX content rendered
-    await expect(
-      page.getByText(/Artificial General Action Intelligence/i),
-    ).toBeVisible();
+    await expect(page.getByText(/multi-agent failure/i)).toBeVisible();
   });
 
   test("tag filtering works", async ({ page }) => {
     await page.goto("/blog");
 
     // Click a tag to filter
-    const researchTag = page.getByTestId("tag-filter").getByText("research");
+    const researchTag = page
+      .getByTestId("tag-filter")
+      .getByText("research", { exact: true });
     await researchTag.click();
 
     await expect(page).toHaveURL(/tag=research/);
 
     // Should still show the research-tagged post
-    await expect(
-      page.getByText(/Tongue-in-Cheek/i).first(),
-    ).toBeVisible();
+    await expect(page.getByText(/Research Harness/i).first()).toBeVisible();
   });
 });

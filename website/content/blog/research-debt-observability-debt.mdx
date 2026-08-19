@@ -1,0 +1,46 @@
+---
+title: "Research Debt and Observability Debt"
+date: "2026-06-04"
+excerpt: "Research systems accumulate evidence debt as quickly as code debt."
+tags: ["observability", "research-methods", "maintenance"]
+author: "Brad Taylor"
+---
+
+# Research Debt and Observability Debt
+
+This research note is backdated to 2026-06-04, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+What debt appears when a research prototype becomes a long-running evidence machine?
+
+## System Move
+
+I consolidated observability, preserved artifact route lookup, tightened decision-log
+fields, reviewed graph structure, and cleaned repo hygiene. The work was less visible
+than Minecraft builds but directly tied to whether future findings are traceable.
+
+## Evidence
+
+- Commits `92eed67b` and `c373e8b8` landed observability consolidation and artifact route lookup preservation.
+- `graphify-out/GRAPH_REPORT.md` documents code graph structure and review context.
+- `core/simulation/decision_log_schema.py` and replay/artifact routes define the evidence trail.
+
+## What Broke
+
+Research debt appears when artifacts exist but readers cannot trace how decisions,
+tools, models, and world changes connect.
+
+## Why It Matters
+
+The signal is maintenance maturity: observability is part of the research result.
+
+## What Changed Next
+
+The next phase is to publish the notebook, invite scrutiny, and continue the Minecraft
+civilization work with the evidence trail intact.
+
+## Series Navigation
+
+- Previous: `/blog/claim-task-earn-build-right`

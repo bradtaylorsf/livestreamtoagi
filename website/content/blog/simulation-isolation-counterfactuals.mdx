@@ -1,0 +1,46 @@
+---
+title: "Simulation Isolation and Counterfactual Runs"
+date: "2026-04-10"
+excerpt: "Counterfactual simulations require isolated memory, Redis state, snapshots, and simulation IDs."
+tags: ["simulation", "isolation", "research-methods"]
+author: "Brad Taylor"
+---
+
+# Simulation Isolation and Counterfactual Runs
+
+This research note is backdated to 2026-04-10, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+How can two runs be compared if they quietly share state?
+
+## System Move
+
+I added simulation-scoped memory, ScopedRedis, snapshots, clone support, CLI paths,
+tool-level simulation IDs, and database error logs. Isolation became a prerequisite for
+meaningful comparisons.
+
+## Evidence
+
+- Issue #252 tracked the simulation isolation work.
+- Commits `02d3ea65`, `4dd5338b`, `ecc0934b`, `99e5a0d4`, and `7a5807fb` landed the isolation phases.
+- `core/simulation/`, `research/RESEARCH-PROGRAM-AND-CONTENT-STRATEGY.md`, and snapshot paths define the counterfactual surface.
+
+## What Broke
+
+Isolation bugs can invalidate a run without looking dramatic in the UI.
+
+## Why It Matters
+
+The signal is experimental discipline: state boundaries are research validity
+boundaries.
+
+## What Changed Next
+
+Longer runs then exposed a different scaling problem: token bloat.
+
+## Series Navigation
+
+- Previous: `/blog/public-website-research-surface`
+- Next: `/blog/token-bloat-memory-compaction`

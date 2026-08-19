@@ -1,0 +1,47 @@
+---
+title: "Claim a Task, Earn the Right to Build"
+date: "2026-05-29"
+excerpt: "Claiming a task became the authorization primitive for planning and building."
+tags: ["authorization", "minecraft", "coordination"]
+author: "Brad Taylor"
+---
+
+# Claim a Task, Earn the Right to Build
+
+This research note is backdated to 2026-05-29, the point in the repository
+history when this part of the system became concrete enough to write about.
+
+## Research Question
+
+How do I connect social commitment to permission to change the world?
+
+## System Move
+
+The emergent mode began requiring agents to claim a task before they could plan and
+build. That linked world mutation to explicit task ownership rather than allowing
+ungrounded build actions.
+
+## Evidence
+
+- Issue #918 tracked emergent build authorization.
+- Commit `8bc34469` landed `claim-a-task -> may planAndBuild`.
+- `docs/minecraft/emergent-mode.md` and the epic-820 alpha-loop summary record the readiness path.
+
+## What Broke
+
+Authorization does not guarantee collaboration. It only makes commitment visible enough
+to evaluate.
+
+## Why It Matters
+
+The signal is socio-technical design: permissions encode the behavior the system is
+trying to study.
+
+## What Changed Next
+
+The latest cleanup turned to research debt and observability debt.
+
+## Series Navigation
+
+- Previous: `/blog/emergent-task-board`
+- Next: `/blog/research-debt-observability-debt`
